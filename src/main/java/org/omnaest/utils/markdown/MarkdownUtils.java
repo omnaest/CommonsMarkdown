@@ -126,12 +126,14 @@ public class MarkdownUtils
     {
         private String link;
         private String label;
+        private String tooltip;
 
-        public Link(String link, String label)
+        public Link(String link, String label, String tooltip)
         {
             super();
             this.link = link;
             this.label = label;
+            this.tooltip = tooltip;
         }
 
         public String getLink()
@@ -144,10 +146,15 @@ public class MarkdownUtils
             return this.label;
         }
 
+        public String getTooltip()
+        {
+            return this.tooltip;
+        }
+
         @Override
         public String toString()
         {
-            return "Link [link=" + this.link + ", label=" + this.label + "]";
+            return "Link [link=" + this.link + ", label=" + this.label + ", tooltip=" + this.tooltip + "]";
         }
 
     }
@@ -223,10 +230,19 @@ public class MarkdownUtils
             @Override
             public void visit(org.commonmark.node.Link link)
             {
-                elements.add(new Link(link.getDestination(), link.getTitle()));
-                super.visit(link);
+                AtomicReference<String> label = new AtomicReference<>();
+                link.accept(new AbstractVisitor()
+                {
+                    @Override
+                    public void visit(org.commonmark.node.Text text)
+                    {
+                        label.updateAndGet(previous -> Optional.ofNullable(previous)
+                                                               .orElse("")
+                                + text.getLiteral());
+                    }
+                });
+                elements.add(new Link(link.getDestination(), label.get(), link.getTitle()));
             }
-
         });
 
         return new MarkdownParseResult()
