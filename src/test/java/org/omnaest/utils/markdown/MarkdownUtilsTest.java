@@ -93,6 +93,98 @@ public class MarkdownUtilsTest
     }
 
     @Test
+    public void testParseParagraphText() throws Exception
+    {
+        //
+        List<Element> elements = MarkdownUtils.parse("This is a text\nand this is the second line\n\nAnother line",
+                                                     options -> options.enableWrapIntoParagraphs())
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(2, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asParagraph()
+                                   .isPresent());
+        assertEquals(true, elements.get(1)
+                                   .asParagraph()
+                                   .isPresent());
+        assertEquals(3, elements.get(0)
+                                .asParagraph()
+                                .get()
+                                .getElements()
+                                .size());
+        assertEquals(1, elements.get(1)
+                                .asParagraph()
+                                .get()
+                                .getElements()
+                                .size());
+
+        //
+        List<Element> elementsOfFirstParagraph = elements.get(0)
+                                                         .asParagraph()
+                                                         .get()
+                                                         .getElements();
+        assertEquals(3, elementsOfFirstParagraph.size());
+        assertEquals(true, elementsOfFirstParagraph.get(0)
+                                                   .asText()
+                                                   .isPresent());
+        assertEquals(true, elementsOfFirstParagraph.get(1)
+                                                   .asLineBreak()
+                                                   .isPresent());
+        assertEquals(true, elementsOfFirstParagraph.get(2)
+                                                   .asText()
+                                                   .isPresent());
+        assertEquals("This is a text", elementsOfFirstParagraph.get(0)
+                                                               .asText()
+                                                               .get()
+                                                               .getValue());
+        assertEquals("and this is the second line", elementsOfFirstParagraph.get(2)
+                                                                            .asText()
+                                                                            .get()
+                                                                            .getValue());
+
+        //
+        List<Element> elementsOfSecondParagraph = elements.get(1)
+                                                          .asParagraph()
+                                                          .get()
+                                                          .getElements();
+        assertEquals(1, elementsOfSecondParagraph.size());
+        assertEquals(true, elementsOfSecondParagraph.get(0)
+                                                    .asText()
+                                                    .isPresent());
+        assertEquals("Another line", elementsOfSecondParagraph.get(0)
+                                                              .asText()
+                                                              .get()
+                                                              .getValue());
+
+    }
+
+    @Test
+    public void testParseImage() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("![Title](/image.png \"Tooltip\")")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asImage()
+                                   .isPresent());
+
+        assertEquals("Title", elements.get(0)
+                                      .asImage()
+                                      .get()
+                                      .getLabel());
+        assertEquals("Tooltip", elements.get(0)
+                                        .asImage()
+                                        .get()
+                                        .getTooltip());
+        assertEquals("/image.png", elements.get(0)
+                                           .asImage()
+                                           .get()
+                                           .getLink());
+
+    }
+
+    @Test
     public void testParseLink() throws Exception
     {
         List<Element> elements = MarkdownUtils.parse("[Link](http://somelink.org \"Tooltip\")")
@@ -118,6 +210,76 @@ public class MarkdownUtilsTest
                                         .asLink()
                                         .get()
                                         .getTooltip());
+    }
+
+    @Test
+    public void testParseUnorderedList() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("- first line\n- second line")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asUnorderedList()
+                                   .isPresent());
+
+        assertEquals(2, elements.get(0)
+                                .asUnorderedList()
+                                .get()
+                                .getElements()
+                                .size());
+        assertEquals("first line", elements.get(0)
+                                           .asUnorderedList()
+                                           .get()
+                                           .getElements()
+                                           .get(0)
+                                           .asText()
+                                           .get()
+                                           .getValue());
+        assertEquals("second line", elements.get(0)
+                                            .asUnorderedList()
+                                            .get()
+                                            .getElements()
+                                            .get(1)
+                                            .asText()
+                                            .get()
+                                            .getValue());
+
+    }
+
+    @Test
+    public void testParseOrderedList() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("1. first line\n2. second line")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asOrderedList()
+                                   .isPresent());
+
+        assertEquals(2, elements.get(0)
+                                .asOrderedList()
+                                .get()
+                                .getElements()
+                                .size());
+        assertEquals("first line", elements.get(0)
+                                           .asOrderedList()
+                                           .get()
+                                           .getElements()
+                                           .get(0)
+                                           .asText()
+                                           .get()
+                                           .getValue());
+        assertEquals("second line", elements.get(0)
+                                            .asOrderedList()
+                                            .get()
+                                            .getElements()
+                                            .get(1)
+                                            .asText()
+                                            .get()
+                                            .getValue());
+
     }
 
 }
