@@ -1,19 +1,48 @@
+/*******************************************************************************
+ * Copyright 2021 Danny Kunz
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License.  You may obtain a copy
+ * of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ ******************************************************************************/
 package org.omnaest.utils.markdown;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.commonmark.Extension;
+import org.commonmark.ext.gfm.tables.TableBlock;
+import org.commonmark.ext.gfm.tables.TableBody;
+import org.commonmark.ext.gfm.tables.TableCell;
+import org.commonmark.ext.gfm.tables.TableHead;
+import org.commonmark.ext.gfm.tables.TableRow;
+import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.node.AbstractVisitor;
 import org.commonmark.node.BulletList;
+import org.commonmark.node.CustomBlock;
+import org.commonmark.node.CustomNode;
 import org.commonmark.node.Emphasis;
 import org.commonmark.node.Node;
 import org.commonmark.node.SoftLineBreak;
+import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
 import org.omnaest.utils.ConsumerUtils;
+import org.omnaest.utils.markdown.MarkdownUtils.Table.Column;
+import org.omnaest.utils.markdown.MarkdownUtils.Table.Row;
 
 /**
  * Utilities around the markdown format of https://commonmark.org/
@@ -65,12 +94,133 @@ public class MarkdownUtils
             return as(OrderedList.class);
         }
 
+        public default Optional<Table> asTable()
+        {
+            return as(Table.class);
+        }
+
         @SuppressWarnings("unchecked")
         public default <T extends Element> Optional<T> as(Class<T> type)
         {
             return Optional.of(this)
                            .filter(element -> type.isAssignableFrom(element.getClass()))
                            .map(element -> (T) element);
+        }
+
+    }
+
+    public static class Table implements Element
+    {
+        private List<Column> columns;
+        private List<Row>    rows;
+
+        public Table(List<Row> rows, List<Column> columns)
+        {
+            super();
+            this.rows = rows;
+            this.columns = columns;
+        }
+
+        public static class Row implements Element
+        {
+            private List<Cell> cells;
+
+            public Row(List<Cell> cells)
+            {
+                super();
+                this.cells = cells;
+            }
+
+            public List<Cell> getCells()
+            {
+                return this.cells;
+            }
+
+            @Override
+            public String toString()
+            {
+                return "Row [cells=" + this.cells + "]";
+            }
+
+        }
+
+        public static class Cell extends Column
+        {
+
+            public Cell(List<Element> elements)
+            {
+                super(elements);
+            }
+
+            @Override
+            public String toString()
+            {
+                return "Cell [getElements()=" + this.getElements() + "]";
+            }
+
+        }
+
+        public static class Column implements Element
+        {
+            private List<Element> elements;
+
+            public Column(List<Element> elements)
+            {
+                super();
+                this.elements = elements;
+            }
+
+            public List<Element> getElements()
+            {
+                return this.elements;
+            }
+
+            public String toText()
+            {
+                return this.elements.stream()
+                                    .map(element -> element.asText()
+                                                           .map(Text::getValue)
+                                                           .orElse(""))
+                                    .collect(Collectors.joining());
+            }
+
+            @Override
+            public String toString()
+            {
+                return "Column [elements=" + this.elements + "]";
+            }
+
+        }
+
+        public List<Column> getColumns()
+        {
+            return this.columns;
+        }
+
+        public List<Row> getRows()
+        {
+            return this.rows;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Table [columns=" + this.columns + ", rows=" + this.rows + "]";
+        }
+
+        public org.omnaest.utils.table.Table asStringTable()
+        {
+            org.omnaest.utils.table.Table table = org.omnaest.utils.table.Table.newInstance();
+            table.addColumnTitles(this.getColumns()
+                                      .stream()
+                                      .map(Column::toText)
+                                      .collect(Collectors.toList()));
+            this.getRows()
+                .forEach(row -> table.addRow(row.getCells()
+                                                .stream()
+                                                .map(Column::toText)
+                                                .collect(Collectors.toList())));
+            return table;
         }
 
     }
@@ -319,7 +469,10 @@ public class MarkdownUtils
 
     public static MarkdownParseResult parse(String text, Consumer<MarkdownParseOptions> optionsConsumer)
     {
+        List<Extension> extensions = Arrays.asList(TablesExtension.create());
         Parser parser = Parser.builder()
+                              .extensions(extensions)
+                              .includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES)
                               .build();
         Node document = parser.parse(text);
 
@@ -471,6 +624,71 @@ public class MarkdownUtils
             List<Element> elements = new ArrayList<>();
             new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(orderedList);
             this.elementConsumer.accept(new OrderedList(elements));
+        }
+
+        @Override
+        public void visit(CustomBlock customBlock)
+        {
+            if (customBlock instanceof TableBlock)
+            {
+                List<Element> elements = this.parseChildrenElements(customBlock);
+                List<Row> rows = elements.stream()
+                                         .filter(element -> element instanceof Table.Row)
+                                         .map(element -> (Table.Row) element)
+                                         .collect(Collectors.toList());
+                List<Column> columns = elements.stream()
+                                               .filter(element -> element instanceof Table.Column)
+                                               .map(element -> (Table.Column) element)
+                                               .collect(Collectors.toList());
+                this.elementConsumer.accept(new Table(rows, columns));
+            }
+            else
+            {
+                super.visit(customBlock);
+            }
+        }
+
+        @Override
+        public void visit(CustomNode customNode)
+        {
+            if (customNode instanceof TableHead)
+            {
+                this.parseChildrenElements(customNode)
+                    .stream()
+                    .filter(element -> element instanceof Table.Row)
+                    .map(element -> (Table.Row) element)
+                    .flatMap(row -> row.getCells()
+                                       .stream())
+                    .forEach(this.elementConsumer::accept);
+            }
+            else if (customNode instanceof TableRow)
+            {
+                this.elementConsumer.accept(new Table.Row(this.parseChildrenElements(customNode)
+                                                              .stream()
+                                                              .filter(element -> element instanceof Table.Cell)
+                                                              .map(element -> (Table.Cell) element)
+                                                              .collect(Collectors.toList())));
+            }
+            else if (customNode instanceof TableCell)
+            {
+                this.elementConsumer.accept(new Table.Cell(this.parseChildrenElements(customNode)));
+            }
+            else if (customNode instanceof TableBody)
+            {
+                this.parseChildrenElements(customNode)
+                    .forEach(this.elementConsumer::accept);
+            }
+            else
+            {
+                super.visit(customNode);
+            }
+        }
+
+        private List<Element> parseChildrenElements(Node node)
+        {
+            List<Element> elements = new ArrayList<>();
+            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(node);
+            return elements;
         }
 
     }

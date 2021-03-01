@@ -1,3 +1,18 @@
+/*******************************************************************************
+ * Copyright 2021 Danny Kunz
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License.  You may obtain a copy
+ * of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
+ ******************************************************************************/
 package org.omnaest.utils.markdown;
 
 import static org.junit.Assert.assertEquals;
@@ -7,7 +22,9 @@ import java.util.stream.Collectors;
 
 import org.junit.Ignore;
 import org.junit.Test;
+import org.omnaest.utils.StringUtils;
 import org.omnaest.utils.markdown.MarkdownUtils.Element;
+import org.omnaest.utils.table.Table;
 
 /**
  * @see MarkdownUtils
@@ -279,6 +296,36 @@ public class MarkdownUtilsTest
                                             .asText()
                                             .get()
                                             .getValue());
+
+    }
+
+    @Test
+    public void testParseTable() throws Exception
+    {
+        String text = StringUtils.builder()
+                                 .addLine("| First Header     | Second Header   |")
+                                 .addLine("| ---------------- | --------------- |")
+                                 .addLine("| Content Cell A1  | Content Cell B1 |")
+                                 .addLine("| Content Cell A2  | Content Cell B2 |")
+                                 .build();
+        List<Element> elements = MarkdownUtils.parse(text)
+                                              .get()
+                                              .collect(Collectors.toList());
+
+        assertEquals(1, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asTable()
+                                   .isPresent());
+
+        Table table = elements.get(0)
+                              .asTable()
+                              .get()
+                              .asStringTable();
+        assertEquals(Table.newInstance()
+                          .addColumnTitles("First Header", "Second Header")
+                          .addRow("Content Cell A1", "Content Cell B1")
+                          .addRow("Content Cell A2", "Content Cell B2"),
+                     table);
 
     }
 
