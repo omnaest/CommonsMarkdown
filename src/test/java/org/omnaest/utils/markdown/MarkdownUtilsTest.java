@@ -16,7 +16,9 @@
 package org.omnaest.utils.markdown;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -24,6 +26,12 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.omnaest.utils.StringUtils;
 import org.omnaest.utils.markdown.MarkdownUtils.Element;
+import org.omnaest.utils.markdown.MarkdownUtils.Heading;
+import org.omnaest.utils.markdown.MarkdownUtils.LineBreak;
+import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocument;
+import org.omnaest.utils.markdown.MarkdownUtils.MarkdownParsedDocument;
+import org.omnaest.utils.markdown.MarkdownUtils.Paragraph;
+import org.omnaest.utils.markdown.MarkdownUtils.Text;
 import org.omnaest.utils.table.Table;
 
 /**
@@ -329,4 +337,156 @@ public class MarkdownUtilsTest
 
     }
 
+    @Test
+    public void testBuildHeading()
+    {
+        MarkdownDocument document = MarkdownUtils.builder()
+                                                 .addHeading("Heading")
+                                                 .build();
+        assertEquals("Heading", document.parse()
+                                        .findFirst(Heading.class)
+                                        .get()
+                                        .getText());
+        assertEquals(1, document.parse()
+                                .findFirst(Heading.class)
+                                .get()
+                                .getStrength());
+    }
+
+    @Test
+    public void testBuildParagraphAndText()
+    {
+        MarkdownDocument document = MarkdownUtils.builder()
+                                                 .addParagraph(paragraph -> paragraph.addText("123"))
+                                                 .build();
+        assertEquals("123", document.parse(options -> options.enableWrapIntoParagraphs())
+                                    .findFirst(Paragraph.class)
+                                    .get()
+                                    .getElements()
+                                    .stream()
+                                    .findFirst()
+                                    .get()
+                                    .asText()
+                                    .get()
+                                    .getValue());
+
+    }
+
+    @Test
+    public void testBuildTable()
+    {
+        MarkdownDocument document = MarkdownUtils.builder()
+                                                 .addLineBreak()
+                                                 .addTable(Table.newInstance()
+                                                                .addColumnTitles("Column1", "Column2")
+                                                                .addRow("value1_1", "value1_2")
+                                                                .addRow("value2_1", "value2_2"))
+                                                 .build();
+        assertEquals(Arrays.asList("Column1", "Column2"), document.parse(options -> options.enableWrapIntoParagraphs())
+                                                                  .findFirst(MarkdownUtils.Table.class)
+                                                                  .get()
+                                                                  .getColumns()
+                                                                  .stream()
+                                                                  .map(column -> column.getElements()
+                                                                                       .stream()
+                                                                                       .findFirst()
+                                                                                       .get()
+                                                                                       .asText()
+                                                                                       .get()
+                                                                                       .getValue())
+                                                                  .collect(Collectors.toList()));
+        assertEquals(Arrays.asList("value1_1", "value1_2", "value2_1", "value2_2"), document.parse()
+                                                                                            .findFirst(MarkdownUtils.Table.class)
+                                                                                            .get()
+                                                                                            .getRows()
+                                                                                            .stream()
+                                                                                            .flatMap(row -> row.getCells()
+                                                                                                               .stream())
+                                                                                            .map(cell -> cell.getElements()
+                                                                                                             .stream()
+                                                                                                             .findFirst()
+                                                                                                             .get()
+                                                                                                             .asText()
+                                                                                                             .get()
+                                                                                                             .getValue())
+                                                                                            .collect(Collectors.toList()));
+
+    }
+
+    @Test
+    public void testBuildTableWithoutColumnHeader()
+    {
+        MarkdownDocument document = MarkdownUtils.builder()
+                                                 .addTable(Table.newInstance()
+                                                                .addRow("value1_1", "value1_2")
+                                                                .addRow("value2_1", "value2_2"))
+                                                 .build();
+        assertEquals(Arrays.asList("value1_1", "value1_2", "value2_1", "value2_2"), document.parse()
+                                                                                            .findFirst(MarkdownUtils.Table.class)
+                                                                                            .get()
+                                                                                            .getRows()
+                                                                                            .stream()
+                                                                                            .flatMap(row -> row.getCells()
+                                                                                                               .stream())
+                                                                                            .map(cell -> cell.getElements()
+                                                                                                             .stream()
+                                                                                                             .findFirst()
+                                                                                                             .get()
+                                                                                                             .asText()
+                                                                                                             .get()
+                                                                                                             .getValue())
+                                                                                            .collect(Collectors.toList()));
+
+    }
+
+    @Test
+    public void testNextLineCharacter()
+    {
+        assertEquals("abc\ndef\n", MarkdownUtils.builder()
+                                                .withLineBreakCharacter("\n")
+                                                .addText("abc")
+                                                .addText("def")
+                                                .build()
+                                                .get());
+        assertEquals("abc\r\ndef\r\n", MarkdownUtils.builder()
+                                                    .withLineBreakCharacter("\r\n")
+                                                    .addText("abc")
+                                                    .addText("def")
+                                                    .build()
+                                                    .get());
+    }
+
+    @Test
+    public void testProcessor()
+    {
+        MarkdownDocument document = MarkdownUtils.builder()
+                                                 .addParagraph(paragraph -> paragraph.addText("123")
+                                                                                     .addText("abc"))
+                                                 .build();
+        StringBuilder stringBuilder = new StringBuilder();
+        document.parse()
+                .newProcessor()
+                .addVisitor(Text.class, text -> stringBuilder.append(text.getValue()))
+                .process();
+        assertEquals("123abc", stringBuilder.toString());
+    }
+
+    @Test
+    public void testAddLineBreak() throws Exception
+    {
+        String markdown = MarkdownUtils.builder()
+                                       .withLineBreakCharacter("\n")
+                                       .addText("abc")
+                                       .addLineBreak()
+                                       .addText("def")
+                                       .build()
+                                       .get();
+        assertEquals("abc\n\\\ndef\n", markdown);
+        MarkdownParsedDocument parsedDocument = MarkdownUtils.parse(markdown);
+        assertTrue(parsedDocument.findFirst(LineBreak.class)
+                                 .isPresent());
+        assertEquals(1, MarkdownUtils.parse(markdown)
+                                     .getAndFilter(LineBreak.class)
+                                     .count());
+    }
 }

@@ -46,12 +46,12 @@
 		<dependency>
 			<groupId>org.commonmark</groupId>
 			<artifactId>commonmark</artifactId>
-			<version>0.17.1</version>
+			<version>0.18.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.commonmark</groupId>
 			<artifactId>commonmark-ext-gfm-tables</artifactId>
-			<version>0.17.1</version>
+			<version>0.18.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.omnaest.utils</groupId>
