@@ -908,6 +908,14 @@ public class MarkdownUtils
         public MarkdownDocumentBuilder addTable(org.omnaest.utils.table.Table table);
 
         public MarkdownDocumentBuilder addLineBreak();
+
+        /**
+         * Applies the current {@link MarkdownDocumentBuilder} to the given {@link Consumer}
+         * 
+         * @param builderConsumer
+         * @return
+         */
+        public MarkdownDocumentBuilder applyTo(Consumer<MarkdownDocumentBuilder> builderConsumer);
     }
 
     public static interface MarkdownParagraphBuilder extends MarkdownTextBuilder<MarkdownParagraphBuilder>
@@ -1105,6 +1113,16 @@ public class MarkdownUtils
             public MarkdownDocumentBuilder addLineBreak()
             {
                 this.appendRawLine("\\");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder applyTo(Consumer<MarkdownDocumentBuilder> builderConsumer)
+            {
+                if (builderConsumer != null)
+                {
+                    builderConsumer.accept(this);
+                }
                 return this;
             }
 
