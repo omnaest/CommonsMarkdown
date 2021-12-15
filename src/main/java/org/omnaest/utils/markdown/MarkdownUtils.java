@@ -912,10 +912,21 @@ public class MarkdownUtils
         /**
          * Applies the current {@link MarkdownDocumentBuilder} to the given {@link Consumer}
          * 
+         * @see #applyToIf(boolean, Consumer)
          * @param builderConsumer
          * @return
          */
         public MarkdownDocumentBuilder applyTo(Consumer<MarkdownDocumentBuilder> builderConsumer);
+
+        /**
+         * If the given boolean condition is true, the {@link Consumer} is invoked and otherwise not
+         * 
+         * @see #applyTo(Consumer)
+         * @param condition
+         * @param builderConsumer
+         * @return
+         */
+        public MarkdownDocumentBuilder applyToIf(boolean condition, Consumer<MarkdownDocumentBuilder> builderConsumer);
     }
 
     public static interface MarkdownParagraphBuilder extends MarkdownTextBuilder<MarkdownParagraphBuilder>
@@ -1120,6 +1131,16 @@ public class MarkdownUtils
             public MarkdownDocumentBuilder applyTo(Consumer<MarkdownDocumentBuilder> builderConsumer)
             {
                 if (builderConsumer != null)
+                {
+                    builderConsumer.accept(this);
+                }
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder applyToIf(boolean condition, Consumer<MarkdownDocumentBuilder> builderConsumer)
+            {
+                if (condition && builderConsumer != null)
                 {
                     builderConsumer.accept(this);
                 }
