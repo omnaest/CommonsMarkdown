@@ -361,14 +361,16 @@ public class MarkdownUtils
 
     public static class Heading implements Element
     {
-        private int    level;
-        private String text;
+        private int           level;
+        private String        text;
+        private List<Element> elements;
 
-        public Heading(int level, String text)
+        public Heading(int level, String text, List<Element> elements)
         {
             super();
             this.level = level;
             this.text = text;
+            this.elements = elements;
         }
 
         public int getStrength()
@@ -381,10 +383,43 @@ public class MarkdownUtils
             return this.text;
         }
 
+        public List<Element> getElements()
+        {
+            return this.elements;
+        }
+
+        public List<Link> getLinks()
+        {
+            return this.getElements()
+                       .stream()
+                       .map(Element::asLink)
+                       .filter(Optional::isPresent)
+                       .map(Optional::get)
+                       .collect(Collectors.toList());
+        }
+
+        public List<Image> getImages()
+        {
+            return this.getElements()
+                       .stream()
+                       .map(Element::asImage)
+                       .filter(Optional::isPresent)
+                       .map(Optional::get)
+                       .collect(Collectors.toList());
+        }
+
         @Override
         public String toString()
         {
-            return "Heading [strength=" + this.level + ", text=" + this.text + "]";
+            StringBuilder builder = new StringBuilder();
+            builder.append("Heading [level=")
+                   .append(this.level)
+                   .append(", text=")
+                   .append(this.text)
+                   .append(", elements=")
+                   .append(this.elements)
+                   .append("]");
+            return builder.toString();
         }
 
     }
@@ -737,6 +772,14 @@ public class MarkdownUtils
         {
             int level = heading.getLevel();
             AtomicReference<String> textHolder = new AtomicReference<>();
+            List<String> links = new ArrayList<>();
+            List<String> images = new ArrayList<>();
+            List<Element> elements = new ArrayList<>();
+            Consumer<Element> localElementConsumer = element ->
+            {
+                elements.add(element);
+            };
+            new ElementConsumerDrivenVisitor(localElementConsumer, this.options).visitChildren(heading);
             new AbstractVisitor()
             {
                 @Override
@@ -747,7 +790,7 @@ public class MarkdownUtils
                 }
 
             }.visit(heading);
-            this.elementConsumer.accept(new Heading(level, textHolder.get()));
+            this.elementConsumer.accept(new Heading(level, textHolder.get(), elements));
         }
 
         @Override

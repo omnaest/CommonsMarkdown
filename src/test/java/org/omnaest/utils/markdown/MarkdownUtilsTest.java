@@ -91,6 +91,63 @@ public class MarkdownUtilsTest
     }
 
     @Test
+    public void testParseHeaderWithLink() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("# [Title](\\#anker)")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        Heading heading = elements.iterator()
+                                  .next()
+                                  .asHeading()
+                                  .get();
+        assertEquals("Title", heading.getText());
+        assertEquals("#anker", heading.getLinks()
+                                      .get(0)
+                                      .getLink());
+        assertEquals(1, heading.getStrength());
+    }
+
+    @Test
+    public void testParseHeaderWithImage() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("# ![Title](image.png)")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        Heading heading = elements.iterator()
+                                  .next()
+                                  .asHeading()
+                                  .get();
+        assertEquals("Title", heading.getText());
+        assertEquals("image.png", heading.getImages()
+                                         .get(0)
+                                         .getLink());
+        assertEquals(1, heading.getStrength());
+    }
+
+    @Test
+    public void testParseHeaderWithLinkAndImage() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("# [Title](\\#anker)![](image.png)")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        Heading heading = elements.iterator()
+                                  .next()
+                                  .asHeading()
+                                  .get();
+        assertEquals("Title", heading.getText());
+        assertEquals("#anker", heading.getLinks()
+                                      .get(0)
+                                      .getLink());
+        assertEquals("image.png", heading.getImages()
+                                         .get(0)
+                                         .getLink());
+        assertEquals(1, heading.getStrength());
+    }
+
+    @Test
     public void testParseText() throws Exception
     {
         List<Element> elements = MarkdownUtils.parse("This is a text\nand this is the second line")
