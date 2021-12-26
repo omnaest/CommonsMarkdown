@@ -48,8 +48,11 @@ import org.commonmark.node.SoftLineBreak;
 import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
 import org.omnaest.utils.ConsumerUtils;
+import org.omnaest.utils.JSONHelper;
 import org.omnaest.utils.MapperUtils;
+import org.omnaest.utils.MatcherUtils;
 import org.omnaest.utils.PredicateUtils;
+import org.omnaest.utils.StreamUtils;
 import org.omnaest.utils.markdown.MarkdownUtils.Table.Column;
 import org.omnaest.utils.markdown.MarkdownUtils.Table.Row;
 
@@ -67,6 +70,11 @@ public class MarkdownUtils
         public default Optional<Text> asText()
         {
             return as(Text.class);
+        }
+
+        public default Optional<CustomIdentifier> asCustomIdentifier()
+        {
+            return as(CustomIdentifier.class);
         }
 
         public default Optional<Heading> asHeading()
@@ -273,6 +281,28 @@ public class MarkdownUtils
                          .collect(Collectors.toList());
         }
 
+        public Stream<String> getCustomIds()
+        {
+            return StreamUtils.recursiveFlattened(this.getChildren()
+                                                      .stream(),
+                                                  element ->
+                                                  {
+                                                      if (element instanceof ElementWithChildren)
+                                                      {
+                                                          return ((ElementWithChildren) element).getChildren()
+                                                                                                .stream();
+                                                      }
+                                                      else
+                                                      {
+                                                          return Stream.empty();
+                                                      }
+                                                  })
+                              .map(Element::asCustomIdentifier)
+                              .filter(Optional::isPresent)
+                              .map(Optional::get)
+                              .map(CustomIdentifier::getIdentifier);
+        }
+
     }
 
     public static class LineBreak implements Element
@@ -310,6 +340,33 @@ public class MarkdownUtils
         public String toString()
         {
             return "Text [value=" + this.value + ", bold=" + this.bold + "]";
+        }
+
+    }
+
+    public static class CustomIdentifier implements Element
+    {
+        private String identifier;
+
+        public CustomIdentifier(String identifier)
+        {
+            super();
+            this.identifier = identifier;
+        }
+
+        public String getIdentifier()
+        {
+            return this.identifier;
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.append("CustomIdentifier [identifier=")
+                   .append(this.identifier)
+                   .append("]");
+            return builder.toString();
         }
 
     }
@@ -362,14 +419,12 @@ public class MarkdownUtils
     public static class Heading implements Element
     {
         private int           level;
-        private String        text;
         private List<Element> elements;
 
-        public Heading(int level, String text, List<Element> elements)
+        public Heading(int level, List<Element> elements)
         {
             super();
             this.level = level;
-            this.text = text;
             this.elements = elements;
         }
 
@@ -378,9 +433,51 @@ public class MarkdownUtils
             return this.level;
         }
 
+        public List<String> getCustomIds()
+        {
+            return this.getElements()
+                       .stream()
+                       .map(Element::asCustomIdentifier)
+                       .filter(Optional::isPresent)
+                       .map(Optional::get)
+                       .map(CustomIdentifier::getIdentifier)
+                       .collect(Collectors.toList());
+        }
+
         public String getText()
         {
-            return this.text;
+            return this.getElements()
+                       .stream()
+                       .flatMap(element ->
+                       {
+                           if (element.asText()
+                                      .isPresent())
+                           {
+                               return Stream.of(element.asText()
+                                                       .get()
+                                                       .getValue());
+                           }
+                           else if (element.asLink()
+                                           .isPresent())
+                           {
+                               return Stream.of(element.asLink()
+                                                       .get()
+                                                       .getLabel());
+                           }
+                           else if (element.asImage()
+                                           .isPresent())
+                           {
+                               return Stream.of(element.asImage()
+                                                       .get()
+                                                       .getLabel());
+                           }
+                           else
+                           {
+                               return Stream.empty();
+                           }
+                       })
+                       .filter(PredicateUtils.notNull())
+                       .collect(Collectors.joining());
         }
 
         public List<Element> getElements()
@@ -414,8 +511,6 @@ public class MarkdownUtils
             StringBuilder builder = new StringBuilder();
             builder.append("Heading [level=")
                    .append(this.level)
-                   .append(", text=")
-                   .append(this.text)
                    .append(", elements=")
                    .append(this.elements)
                    .append("]");
@@ -555,7 +650,8 @@ public class MarkdownUtils
 
     public static class MarkdownParseOptions
     {
-        private boolean wrapIntoParagraphs = false;
+        private boolean wrapIntoParagraphs  = false;
+        private boolean parseCustomIdTokens = false;
 
         protected MarkdownParseOptions()
         {
@@ -578,6 +674,27 @@ public class MarkdownUtils
             return this.wrapIntoParagraphs;
         }
 
+        public boolean isParseCustomIdTokens()
+        {
+            return this.parseCustomIdTokens;
+        }
+
+        public MarkdownParseOptions enableParseCustomIdTokens()
+        {
+            return this.enableParseCustomIdTokens(true);
+        }
+
+        public MarkdownParseOptions enableParseCustomIdTokens(boolean parseCustomIdTokens)
+        {
+            this.parseCustomIdTokens = parseCustomIdTokens;
+            return this;
+        }
+
+        @Override
+        public MarkdownParseOptions clone()
+        {
+            return JSONHelper.clone(this);
+        }
     }
 
     public static MarkdownParsedDocument parse(String text)
@@ -587,6 +704,16 @@ public class MarkdownUtils
 
     public static MarkdownParsedDocument parse(String text, Consumer<MarkdownParseOptions> optionsConsumer)
     {
+        //
+        MarkdownParseOptions options = new MarkdownParseOptions();
+        Optional.ofNullable(optionsConsumer)
+                .ifPresent(consumer -> consumer.accept(options));
+        return parse(text, options);
+    }
+
+    private static MarkdownParsedDocument parse(String text, MarkdownParseOptions options)
+    {
+        //
         List<Extension> extensions = Arrays.asList(TablesExtension.create());
         Parser parser = Parser.builder()
                               .extensions(extensions)
@@ -595,11 +722,6 @@ public class MarkdownUtils
         Node document = parser.parse(text);
 
         List<Element> elements = new ArrayList<>();
-
-        //
-        MarkdownParseOptions options = new MarkdownParseOptions();
-        Optional.ofNullable(optionsConsumer)
-                .ifPresent(consumer -> consumer.accept(options));
 
         //
         Consumer<Element> elementConsumer = e -> elements.add(e);
@@ -763,7 +885,13 @@ public class MarkdownUtils
         public void visit(org.commonmark.node.Text text)
         {
             String value = text.getLiteral();
-            this.elementConsumer.accept(new Text(value, this.bold));
+            String nonInterpretableValue = this.options.isParseCustomIdTokens() ? MatcherUtils.interpreter()
+                                                                                              .ifContainsRegEx("\\{([^\\}]*)\\}",
+                                                                                                               customIdMatch -> customIdMatch.getSubGroupsAsStream()
+                                                                                                                                             .forEach(group -> this.elementConsumer.accept(new CustomIdentifier(group))))
+                                                                                              .apply(value)
+                    : value;
+            this.elementConsumer.accept(new Text(nonInterpretableValue, this.bold));
             super.visit(text);
         }
 
@@ -771,26 +899,9 @@ public class MarkdownUtils
         public void visit(org.commonmark.node.Heading heading)
         {
             int level = heading.getLevel();
-            AtomicReference<String> textHolder = new AtomicReference<>();
-            List<String> links = new ArrayList<>();
-            List<String> images = new ArrayList<>();
             List<Element> elements = new ArrayList<>();
-            Consumer<Element> localElementConsumer = element ->
-            {
-                elements.add(element);
-            };
-            new ElementConsumerDrivenVisitor(localElementConsumer, this.options).visitChildren(heading);
-            new AbstractVisitor()
-            {
-                @Override
-                public void visit(org.commonmark.node.Text text)
-                {
-                    textHolder.updateAndGet(currentText -> org.apache.commons.lang3.StringUtils.defaultString(currentText) + text.getLiteral());
-                    super.visit(text);
-                }
-
-            }.visit(heading);
-            this.elementConsumer.accept(new Heading(level, textHolder.get(), elements));
+            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(heading);
+            this.elementConsumer.accept(new Heading(level, elements));
         }
 
         @Override

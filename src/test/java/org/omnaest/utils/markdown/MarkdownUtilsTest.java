@@ -109,6 +109,23 @@ public class MarkdownUtilsTest
     }
 
     @Test
+    public void testParseHeaderWithCustomId() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("# Title{#anker}", options -> options.enableParseCustomIdTokens())
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        Heading heading = elements.iterator()
+                                  .next()
+                                  .asHeading()
+                                  .get();
+        assertEquals("Title", heading.getText());
+        assertEquals("#anker", heading.getCustomIds()
+                                      .get(0));
+        assertEquals(1, heading.getStrength());
+    }
+
+    @Test
     public void testParseHeaderWithImage() throws Exception
     {
         List<Element> elements = MarkdownUtils.parse("# ![Title](image.png)")
@@ -389,6 +406,41 @@ public class MarkdownUtilsTest
         assertEquals(Table.newInstance()
                           .addColumnTitles("First Header", "Second Header")
                           .addRow("Content Cell A1", "Content Cell B1")
+                          .addRow("Content Cell A2", "Content Cell B2"),
+                     table);
+
+    }
+
+    @Test
+    public void testParseTable2() throws Exception
+    {
+        String text = StringUtils.builder()
+                                 .addLine("| {GRID}First Header     | Second Header   |")
+                                 .addLine("| ---- | ---- |")
+                                 .addLine("| ![Image Title](image.png) | Content Cell B1 |")
+                                 .addLine("| Content Cell A2  | Content Cell B2 |")
+                                 .build();
+        List<Element> elements = MarkdownUtils.parse(text, options -> options.enableParseCustomIdTokens())
+                                              .get()
+                                              .collect(Collectors.toList());
+
+        assertEquals(1, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asTable()
+                                   .isPresent());
+        assertEquals("GRID", elements.get(0)
+                                     .asTable()
+                                     .get()
+                                     .getCustomIds()
+                                     .findFirst()
+                                     .orElse(null));
+        Table table = elements.get(0)
+                              .asTable()
+                              .get()
+                              .asStringTable();
+        assertEquals(Table.newInstance()
+                          .addColumnTitles("First Header", "Second Header")
+                          .addRow("", "Content Cell B1")
                           .addRow("Content Cell A2", "Content Cell B2"),
                      table);
 
