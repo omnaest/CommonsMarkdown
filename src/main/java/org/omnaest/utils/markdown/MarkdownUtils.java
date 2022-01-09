@@ -15,6 +15,7 @@
  ******************************************************************************/
 package org.omnaest.utils.markdown;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -48,6 +49,7 @@ import org.commonmark.node.SoftLineBreak;
 import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
 import org.omnaest.utils.ConsumerUtils;
+import org.omnaest.utils.FileUtils;
 import org.omnaest.utils.JSONHelper;
 import org.omnaest.utils.MapperUtils;
 import org.omnaest.utils.MatcherUtils;
@@ -64,6 +66,72 @@ import org.omnaest.utils.markdown.MarkdownUtils.Table.Row;
  */
 public class MarkdownUtils
 {
+    private static class MarkdownProcessorImpl extends MarkdownSubProcessorImpl implements MarkdownProcessor
+    {
+        private final MarkdownParsedDocument document;
+
+        public MarkdownProcessorImpl(MarkdownParsedDocument document)
+        {
+            this.document = document;
+        }
+
+        @Override
+        public MarkdownParsedDocument process()
+        {
+            this.process(this.document.get()
+                                      .collect(Collectors.toList()));
+            return this.document;
+        }
+
+        @Override
+        public <E extends Element> MarkdownProcessorImpl addVisitor(Class<E> elementType, Consumer<E> elementConsumer)
+        {
+            super.addVisitor(elementType, elementConsumer);
+            return this;
+        }
+
+        @Override
+        public <E extends Element> MarkdownProcessorImpl addVisitor(Class<E> elementType, BiConsumer<E, MarkdownProcessorControl> elementConsumer)
+        {
+
+            super.addVisitor(elementType, elementConsumer);
+            return this;
+        }
+
+    }
+
+    private static class MarkdownSubProcessorImpl implements MarkdownSubProcessor
+    {
+        private final Map<Class<? extends Element>, BiConsumer<Element, MarkdownProcessorControl>> elementTypeToConsumer = new HashMap<>();
+
+        @Override
+        public <E extends Element> MarkdownSubProcessorImpl addVisitor(Class<E> elementType, Consumer<E> elementConsumer)
+        {
+            return this.addVisitor(elementType, (element, control) -> elementConsumer.accept(element));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public <E extends Element> MarkdownSubProcessorImpl addVisitor(Class<E> elementType, BiConsumer<E, MarkdownProcessorControl> elementConsumer)
+        {
+            this.elementTypeToConsumer.put(elementType, (BiConsumer<Element, MarkdownProcessorControl>) elementConsumer);
+            return this;
+        }
+
+        protected void process(List<Element> elements)
+        {
+            elements.forEach(element ->
+            {
+                ProcessorControlImpl processorControl = new ProcessorControlImpl(element, this::process);
+                this.elementTypeToConsumer.forEach((elementType, elementConsumer) -> Optional.ofNullable(element)
+                                                                                             .filter(iElement -> elementType.isAssignableFrom(iElement.getClass()))
+                                                                                             .map(MapperUtils.identityCast(elementType))
+                                                                                             .ifPresent(iElement -> elementConsumer.accept(iElement,
+                                                                                                                                           processorControl)));
+                processorControl.processChildrenNowIfProcessingStillAllowed();
+            });
+        }
+    }
 
     public static interface Element
     {
@@ -632,18 +700,31 @@ public class MarkdownUtils
         public <E extends Element> Stream<E> getAndFilter(Class<E> elementType);
     }
 
-    public static interface MarkdownProcessor
+    public static interface MarkdownSubProcessor
+    {
+        public <E extends Element> MarkdownSubProcessor addVisitor(Class<E> elementType, Consumer<E> elementConsumer);
+
+        public <E extends Element> MarkdownSubProcessor addVisitor(Class<E> elementType, BiConsumer<E, MarkdownProcessorControl> elementConsumer);
+
+    }
+
+    public static interface MarkdownProcessor extends MarkdownSubProcessor
     {
         public MarkdownParsedDocument process();
 
+        @Override
         public <E extends Element> MarkdownProcessor addVisitor(Class<E> elementType, Consumer<E> elementConsumer);
 
+        @Override
         public <E extends Element> MarkdownProcessor addVisitor(Class<E> elementType, BiConsumer<E, MarkdownProcessorControl> elementConsumer);
+
     }
 
     public static interface MarkdownProcessorControl
     {
         public MarkdownProcessorControl processChildrenNow();
+
+        public MarkdownProcessorControl processChildrenNowWith(Consumer<MarkdownSubProcessor> subProcessorConsumer);
 
         public MarkdownProcessorControl doNotProcessChildren();
     }
@@ -758,46 +839,7 @@ public class MarkdownUtils
             public MarkdownProcessor newProcessor()
             {
                 MarkdownParsedDocument document = this;
-                return new MarkdownProcessor()
-                {
-                    private Map<Class<? extends Element>, BiConsumer<Element, MarkdownProcessorControl>> elementTypeToConsumer = new HashMap<>();
-
-                    @Override
-                    public <E extends Element> MarkdownProcessor addVisitor(Class<E> elementType, Consumer<E> elementConsumer)
-                    {
-                        return this.addVisitor(elementType, (element, control) -> elementConsumer.accept(element));
-                    }
-
-                    @SuppressWarnings("unchecked")
-                    @Override
-                    public <E extends Element> MarkdownProcessor addVisitor(Class<E> elementType, BiConsumer<E, MarkdownProcessorControl> elementConsumer)
-                    {
-                        this.elementTypeToConsumer.put(elementType, (BiConsumer<Element, MarkdownProcessorControl>) elementConsumer);
-                        return this;
-                    }
-
-                    @Override
-                    public MarkdownParsedDocument process()
-                    {
-                        this.process(get().collect(Collectors.toList()));
-                        return document;
-                    }
-
-                    private void process(List<Element> elements)
-                    {
-                        elements.forEach(element ->
-                        {
-                            ProcessorControlImpl processorControl = new ProcessorControlImpl(element, this::process);
-                            this.elementTypeToConsumer.forEach((elementType, elementConsumer) -> Optional.ofNullable(element)
-                                                                                                         .filter(iElement -> elementType.isAssignableFrom(iElement.getClass()))
-                                                                                                         .map(MapperUtils.identityCast(elementType))
-                                                                                                         .ifPresent(iElement -> elementConsumer.accept(iElement,
-                                                                                                                                                       processorControl)));
-                            processorControl.processChildrenNowIfProcessingStillAllowed();
-                        });
-                    }
-
-                };
+                return new MarkdownProcessorImpl(document);
             }
 
         };
@@ -824,6 +866,16 @@ public class MarkdownUtils
         }
 
         @Override
+        public MarkdownProcessorControl processChildrenNowWith(Consumer<MarkdownSubProcessor> interpreterConsumer)
+        {
+            MarkdownSubProcessorImpl subProcessor = new MarkdownSubProcessorImpl();
+            interpreterConsumer.accept(subProcessor);
+            subProcessor.process(this.resolveChildren());
+            this.childrenProcessing = false;
+            return this;
+        }
+
+        @Override
         public MarkdownProcessorControl doNotProcessChildren()
         {
             this.childrenProcessing = false;
@@ -834,12 +886,17 @@ public class MarkdownUtils
         {
             if (this.childrenProcessing)
             {
-                this.elementsProcessor.accept(this.element.asElementWithChildren()
-                                                          .map(ElementWithChildren::getChildren)
-                                                          .orElse(Collections.emptyList()));
+                this.elementsProcessor.accept(this.resolveChildren());
                 this.childrenProcessing = false;
             }
             return this;
+        }
+
+        private List<Element> resolveChildren()
+        {
+            return this.element.asElementWithChildren()
+                               .map(ElementWithChildren::getChildren)
+                               .orElse(Collections.emptyList());
         }
 
     }
@@ -1102,6 +1159,8 @@ public class MarkdownUtils
         public MarkdownParsedDocument parse();
 
         public MarkdownParsedDocument parse(Consumer<MarkdownParseOptions> optionsConsumer);
+
+        public MarkdownDocument writeTo(File file);
     }
 
     public static MarkdownDocumentBuilder builder()
@@ -1151,6 +1210,14 @@ public class MarkdownUtils
                     public MarkdownParsedDocument parse(Consumer<MarkdownParseOptions> optionsConsumer)
                     {
                         return MarkdownUtils.parse(this.get(), optionsConsumer);
+                    }
+
+                    @Override
+                    public MarkdownDocument writeTo(File file)
+                    {
+                        FileUtils.toConsumer(file)
+                                 .accept(this);
+                        return this;
                     }
                 };
             }

@@ -412,6 +412,48 @@ public class MarkdownUtilsTest
     }
 
     @Test
+    public void testParseTableWithEmptyCells() throws Exception
+    {
+        String text = MarkdownUtils.builder()
+                                   .addTable(Table.newInstance()
+                                                  .addColumnTitles("First Header", "Second Header")
+                                                  .addRow("", "Content Cell B1")
+                                                  .addRow("Content Cell A2", ""))
+                                   .build()
+                                   .get();
+        String expectedText = StringUtils.builder()
+                                         .withLineSeparator("\n")
+                                         .addLineBreak()
+                                         .addLine("|First Header|Second Header|")
+                                         .addLine("|------------|-------------|")
+                                         .addLine("||Content Cell B1|")
+                                         .addLine("|Content Cell A2||")
+                                         .build();
+        assertEquals(expectedText, text);
+        List<Element> elements = MarkdownUtils.parse(text)
+                                              .get()
+                                              .collect(Collectors.toList());
+
+        assertEquals(1, elements.size());
+        assertEquals(true, elements.get(0)
+                                   .asTable()
+                                   .isPresent());
+
+        Table table = elements.get(0)
+                              .asTable()
+                              .get()
+                              .asStringTable();
+        assertEquals("", table.getValue(0, 0));
+        assertEquals("", table.getValue(1, 1));
+        assertEquals(Table.newInstance()
+                          .addColumnTitles("First Header", "Second Header")
+                          .addRow("", "Content Cell B1")
+                          .addRow("Content Cell A2", ""),
+                     table);
+
+    }
+
+    @Test
     public void testParseTable2() throws Exception
     {
         String text = StringUtils.builder()
