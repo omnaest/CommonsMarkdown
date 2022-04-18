@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -66,6 +67,58 @@ import org.omnaest.utils.markdown.MarkdownUtils.Table.Row;
  */
 public class MarkdownUtils
 {
+    private static class MarkdownParsedDocumentImpl implements MarkdownParsedDocument
+    {
+        private final List<Element> elements;
+
+        private MarkdownParsedDocumentImpl(List<Element> elements)
+        {
+            this.elements = elements;
+        }
+
+        @Override
+        public Stream<Element> get()
+        {
+            return this.elements.stream();
+        }
+
+        @Override
+        public <E extends Element> Optional<E> findFirst(Class<E> elementType)
+        {
+            return this.get()
+                       .filter(PredicateUtils.matchesType(elementType))
+                       .map(MapperUtils.identityCast(elementType))
+                       .findFirst()
+                       .flatMap(element -> element.as(elementType));
+        }
+
+        @Override
+        public <E extends Element> Stream<E> getAndFilter(Class<E> elementType)
+        {
+            return this.get()
+                       .filter(PredicateUtils.matchesType(elementType))
+                       .map(MapperUtils.identityCast(elementType));
+        }
+
+        @Override
+        public MarkdownProcessor newProcessor()
+        {
+            MarkdownParsedDocument document = this;
+            return new MarkdownProcessorImpl(document);
+        }
+
+        @Override
+        public MarkdownParsedDocument clearCustomTokens()
+        {
+            return new MarkdownParsedDocumentImpl(this.elements.stream()
+                                                               .map(element -> element.cloneAndFilter(clonedElement -> !clonedElement.asCustomIdentifier()
+                                                                                                                                     .isPresent()))
+                                                               .filter(PredicateUtils.filterNonEmptyOptional())
+                                                               .map(MapperUtils.mapOptionalToValue())
+                                                               .collect(Collectors.toList()));
+        }
+    }
+
     private static class MarkdownProcessorImpl extends MarkdownSubProcessorImpl implements MarkdownProcessor
     {
         private final MarkdownParsedDocument document;
@@ -197,6 +250,8 @@ public class MarkdownUtils
         {
             return as(ElementWithChildren.class);
         }
+
+        public Optional<? extends Element> cloneAndFilter(Predicate<Element> inclusionFilter);
     }
 
     public static interface ElementWithChildren extends Element
@@ -254,6 +309,16 @@ public class MarkdownUtils
                            .collect(Collectors.toList());
             }
 
+            @Override
+            public Optional<Row> cloneAndFilter(Predicate<Element> inclusionFilter)
+            {
+                return Optional.ofNullable(new Row(this.cells.stream()
+                                                             .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                             .filter(PredicateUtils.filterNonEmptyOptional())
+                                                             .map(MapperUtils.mapOptionalToValue())
+                                                             .collect(Collectors.toList())))
+                               .filter(inclusionFilter);
+            }
         }
 
         public static class Cell extends Column
@@ -267,6 +332,18 @@ public class MarkdownUtils
             public String toString()
             {
                 return "Cell [getElements()=" + this.getElements() + "]";
+            }
+
+            @Override
+            public Optional<Cell> cloneAndFilter(Predicate<Element> inclusionFilter)
+            {
+                return Optional.ofNullable(new Cell(this.getElements()
+                                                        .stream()
+                                                        .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                        .filter(PredicateUtils.filterNonEmptyOptional())
+                                                        .map(MapperUtils.mapOptionalToValue())
+                                                        .collect(Collectors.toList())))
+                               .filter(inclusionFilter);
             }
         }
 
@@ -304,6 +381,17 @@ public class MarkdownUtils
             public List<Element> getChildren()
             {
                 return this.getElements();
+            }
+
+            @Override
+            public Optional<? extends Column> cloneAndFilter(Predicate<Element> inclusionFilter)
+            {
+                return Optional.ofNullable(new Column(this.elements.stream()
+                                                                   .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                                   .filter(PredicateUtils.filterNonEmptyOptional())
+                                                                   .map(MapperUtils.mapOptionalToValue())
+                                                                   .collect(Collectors.toList())))
+                               .filter(inclusionFilter);
             }
 
         }
@@ -371,6 +459,22 @@ public class MarkdownUtils
                               .map(CustomIdentifier::getIdentifier);
         }
 
+        @Override
+        public Optional<Table> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new Table(this.rows.stream()
+                                                          .map(row -> row.cloneAndFilter(inclusionFilter))
+                                                          .filter(PredicateUtils.filterNonEmptyOptional())
+                                                          .map(MapperUtils.mapOptionalToValue())
+                                                          .collect(Collectors.toList()),
+                                                 this.columns.stream()
+                                                             .map(column -> column.cloneAndFilter(inclusionFilter))
+                                                             .filter(PredicateUtils.filterNonEmptyOptional())
+                                                             .map(MapperUtils.mapOptionalToValue())
+                                                             .collect(Collectors.toList())))
+                           .filter(inclusionFilter);
+        }
+
     }
 
     public static class LineBreak implements Element
@@ -379,6 +483,13 @@ public class MarkdownUtils
         public String toString()
         {
             return "LineBreak []";
+        }
+
+        @Override
+        public Optional<LineBreak> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new LineBreak())
+                           .filter(inclusionFilter);
         }
     }
 
@@ -410,6 +521,13 @@ public class MarkdownUtils
             return "Text [value=" + this.value + ", bold=" + this.bold + "]";
         }
 
+        @Override
+        public Optional<Text> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new Text(this.value, this.bold))
+                           .filter(inclusionFilter);
+        }
+
     }
 
     public static class CustomIdentifier implements Element
@@ -437,6 +555,12 @@ public class MarkdownUtils
             return builder.toString();
         }
 
+        @Override
+        public Optional<CustomIdentifier> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new CustomIdentifier(this.identifier))
+                           .filter(inclusionFilter);
+        }
     }
 
     public static class BasicList implements ElementWithChildren
@@ -466,6 +590,16 @@ public class MarkdownUtils
             return "BasicList [elements=" + this.elements + "]";
         }
 
+        @Override
+        public Optional<? extends BasicList> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new BasicList(this.elements.stream()
+                                                                  .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                                  .filter(PredicateUtils.filterNonEmptyOptional())
+                                                                  .map(MapperUtils.mapOptionalToValue())
+                                                                  .collect(Collectors.toList())))
+                           .filter(inclusionFilter);
+        }
     }
 
     public static class UnorderedList extends BasicList
@@ -474,6 +608,18 @@ public class MarkdownUtils
         {
             super(elements);
         }
+
+        @Override
+        public Optional<UnorderedList> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new UnorderedList(this.getElements()
+                                                             .stream()
+                                                             .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                             .filter(PredicateUtils.filterNonEmptyOptional())
+                                                             .map(MapperUtils.mapOptionalToValue())
+                                                             .collect(Collectors.toList())))
+                           .filter(inclusionFilter);
+        }
     }
 
     public static class OrderedList extends BasicList
@@ -481,6 +627,18 @@ public class MarkdownUtils
         public OrderedList(List<Element> elements)
         {
             super(elements);
+        }
+
+        @Override
+        public Optional<OrderedList> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new OrderedList(this.getElements()
+                                                           .stream()
+                                                           .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                           .filter(PredicateUtils.filterNonEmptyOptional())
+                                                           .map(MapperUtils.mapOptionalToValue())
+                                                           .collect(Collectors.toList())))
+                           .filter(inclusionFilter);
         }
     }
 
@@ -585,19 +743,31 @@ public class MarkdownUtils
             return builder.toString();
         }
 
+        @Override
+        public Optional<Heading> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new Heading(this.level, this.getElements()
+                                                                   .stream()
+                                                                   .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                                   .filter(PredicateUtils.filterNonEmptyOptional())
+                                                                   .map(MapperUtils.mapOptionalToValue())
+                                                                   .collect(Collectors.toList())))
+                           .filter(inclusionFilter);
+        }
+
     }
 
     public static class Link implements Element
     {
-        private String link;
-        private String label;
-        private String tooltip;
+        private String        link;
+        private String        tooltip;
+        private List<Element> elements;
 
-        public Link(String link, String label, String tooltip)
+        public Link(String link, List<Element> elements, String tooltip)
         {
             super();
             this.link = link;
-            this.label = label;
+            this.elements = elements;
             this.tooltip = tooltip;
         }
 
@@ -608,7 +778,24 @@ public class MarkdownUtils
 
         public String getLabel()
         {
-            return this.label;
+            return Optional.ofNullable(this.elements)
+                           .orElse(Collections.emptyList())
+                           .stream()
+                           .map(Element::asText)
+                           .filter(PredicateUtils.filterNonEmptyOptional())
+                           .map(MapperUtils.mapOptionalToValue())
+                           .map(Text::getValue)
+                           .collect(Collectors.joining());
+        }
+
+        public List<String> getCustomIds()
+        {
+            return this.elements.stream()
+                                .map(Element::asCustomIdentifier)
+                                .filter(Optional::isPresent)
+                                .map(Optional::get)
+                                .map(CustomIdentifier::getIdentifier)
+                                .collect(Collectors.toList());
         }
 
         public String getTooltip()
@@ -619,9 +806,20 @@ public class MarkdownUtils
         @Override
         public String toString()
         {
-            return "Link [link=" + this.link + ", label=" + this.label + ", tooltip=" + this.tooltip + "]";
+            return "Link [link=" + this.link + ", label=" + this.getLabel() + ", tooltip=" + this.tooltip + "]";
         }
 
+        @Override
+        public Optional<Link> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new Link(this.link, this.elements.stream()
+                                                                        .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                                        .filter(PredicateUtils.filterNonEmptyOptional())
+                                                                        .map(MapperUtils.mapOptionalToValue())
+                                                                        .collect(Collectors.toList()),
+                                                this.tooltip))
+                           .filter(inclusionFilter);
+        }
     }
 
     public static class Paragraph implements ElementWithChildren
@@ -649,6 +847,17 @@ public class MarkdownUtils
         public List<Element> getChildren()
         {
             return this.getElements();
+        }
+
+        @Override
+        public Optional<Paragraph> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new Paragraph(this.elements.stream()
+                                                                  .map(element -> element.cloneAndFilter(inclusionFilter))
+                                                                  .filter(PredicateUtils.filterNonEmptyOptional())
+                                                                  .map(MapperUtils.mapOptionalToValue())
+                                                                  .collect(Collectors.toList())))
+                           .filter(inclusionFilter);
         }
     }
 
@@ -687,6 +896,12 @@ public class MarkdownUtils
             return "Image [link=" + this.link + ", label=" + this.label + ", tooltip=" + this.tooltip + "]";
         }
 
+        @Override
+        public Optional<Image> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.ofNullable(new Image(this.link, this.label, this.tooltip))
+                           .filter(inclusionFilter);
+        }
     }
 
     public static interface MarkdownParsedDocument
@@ -698,6 +913,8 @@ public class MarkdownUtils
         public MarkdownProcessor newProcessor();
 
         public <E extends Element> Stream<E> getAndFilter(Class<E> elementType);
+
+        public MarkdownParsedDocument clearCustomTokens();
     }
 
     public static interface MarkdownSubProcessor
@@ -809,40 +1026,7 @@ public class MarkdownUtils
         document.accept(new ElementConsumerDrivenVisitor(elementConsumer, options));
 
         //
-        return new MarkdownParsedDocument()
-        {
-            @Override
-            public Stream<Element> get()
-            {
-                return elements.stream();
-            }
-
-            @Override
-            public <E extends Element> Optional<E> findFirst(Class<E> elementType)
-            {
-                return this.get()
-                           .filter(PredicateUtils.matchesType(elementType))
-                           .map(MapperUtils.identityCast(elementType))
-                           .findFirst()
-                           .flatMap(element -> element.as(elementType));
-            }
-
-            @Override
-            public <E extends Element> Stream<E> getAndFilter(Class<E> elementType)
-            {
-                return this.get()
-                           .filter(PredicateUtils.matchesType(elementType))
-                           .map(MapperUtils.identityCast(elementType));
-            }
-
-            @Override
-            public MarkdownProcessor newProcessor()
-            {
-                MarkdownParsedDocument document = this;
-                return new MarkdownProcessorImpl(document);
-            }
-
-        };
+        return new MarkdownParsedDocumentImpl(elements);
     }
 
     private static class ProcessorControlImpl implements MarkdownProcessorControl
@@ -964,18 +1148,20 @@ public class MarkdownUtils
         @Override
         public void visit(org.commonmark.node.Link link)
         {
-            AtomicReference<String> label = new AtomicReference<>();
-            link.accept(new AbstractVisitor()
-            {
-                @Override
-                public void visit(org.commonmark.node.Text text)
-                {
-                    label.updateAndGet(previous -> Optional.ofNullable(previous)
-                                                           .orElse("")
-                            + text.getLiteral());
-                }
-            });
-            this.elementConsumer.accept(new Link(link.getDestination(), label.get(), link.getTitle()));
+            //            AtomicReference<String> label = new AtomicReference<>();
+            //            link.accept(new AbstractVisitor()
+            //            {
+            //                @Override
+            //                public void visit(org.commonmark.node.Text text)
+            //                {
+            //                    label.updateAndGet(previous -> Optional.ofNullable(previous)
+            //                                                           .orElse("")
+            //                            + text.getLiteral());
+            //                }
+            //            });
+            List<Element> elements = new ArrayList<>();
+            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(link);
+            this.elementConsumer.accept(new Link(link.getDestination(), elements, link.getTitle()));
         }
 
         @Override
@@ -1112,6 +1298,8 @@ public class MarkdownUtils
 
         public MarkdownDocumentBuilder addHeading(HeadingStrength headingStrength, String heading);
 
+        public MarkdownDocumentBuilder addLink(String label, String link, String tooltip);
+
         public MarkdownDocumentBuilder addParagraph(Consumer<MarkdownParagraphBuilder> paragraphBuilderConsumer);
 
         public MarkdownDocumentBuilder withLineBreakCharacter(String lineBreakCharacter);
@@ -1138,6 +1326,7 @@ public class MarkdownUtils
          * @return
          */
         public MarkdownDocumentBuilder applyToIf(boolean condition, Consumer<MarkdownDocumentBuilder> builderConsumer);
+
     }
 
     public static interface MarkdownParagraphBuilder extends MarkdownTextBuilder<MarkdownParagraphBuilder>
@@ -1180,6 +1369,13 @@ public class MarkdownUtils
             public MarkdownDocumentBuilder addHeading(HeadingStrength headingStrength, String heading)
             {
                 this.appendRawLine(StringUtils.repeat("#", headingStrength.getStrength()) + " " + heading);
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addLink(String label, String link, String tooltip)
+            {
+                this.appendRawLine("[" + label + "](" + link + " \"" + tooltip + "\")");
                 return this;
             }
 

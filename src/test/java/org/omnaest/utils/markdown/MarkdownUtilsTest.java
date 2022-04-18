@@ -28,6 +28,7 @@ import org.omnaest.utils.StringUtils;
 import org.omnaest.utils.markdown.MarkdownUtils.Element;
 import org.omnaest.utils.markdown.MarkdownUtils.Heading;
 import org.omnaest.utils.markdown.MarkdownUtils.LineBreak;
+import org.omnaest.utils.markdown.MarkdownUtils.Link;
 import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocument;
 import org.omnaest.utils.markdown.MarkdownUtils.MarkdownParsedDocument;
 import org.omnaest.utils.markdown.MarkdownUtils.Paragraph;
@@ -123,6 +124,85 @@ public class MarkdownUtilsTest
         assertEquals("#anker", heading.getCustomIds()
                                       .get(0));
         assertEquals(1, heading.getStrength());
+    }
+
+    @Test
+    public void testParseLinkWithCustomId() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("[Title{BUTTON}](abc)", options -> options.enableParseCustomIdTokens())
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(1, elements.size());
+        Link link = elements.iterator()
+                            .next()
+                            .asLink()
+                            .get();
+        assertEquals("Title", link.getLabel());
+        assertEquals("BUTTON", link.getCustomIds()
+                                   .get(0));
+        assertEquals("abc", link.getLink());
+    }
+
+    @Test
+    public void testParseAndSerializeWithoutCustomId() throws Exception
+    {
+        MarkdownDocument markdownDocument = MarkdownUtils.builder()
+                                                         .addHeading("Title{#anker}")
+                                                         .addLink("Label{BUTTON}", "http://link", "tooltip")
+                                                         .build();
+        {
+            List<Element> elements = markdownDocument.parse(options -> options.enableParseCustomIdTokens())
+                                                     .get()
+                                                     .collect(Collectors.toList());
+            assertEquals(2, elements.size());
+
+            Heading heading = elements.stream()
+                                      .findFirst()
+                                      .flatMap(Element::asHeading)
+                                      .get();
+            Link link = elements.stream()
+                                .skip(1)
+                                .findFirst()
+                                .flatMap(Element::asLink)
+                                .get();
+
+            assertEquals("Title", heading.getText());
+            assertEquals("#anker", heading.getCustomIds()
+                                          .get(0));
+
+            assertEquals("Label", link.getLabel());
+            assertEquals("BUTTON", link.getCustomIds()
+                                       .get(0));
+            assertEquals("http://link", link.getLink());
+            assertEquals("tooltip", link.getTooltip());
+        }
+        {
+            List<Element> elements = markdownDocument.parse(options -> options.enableParseCustomIdTokens())
+                                                     .clearCustomTokens()
+                                                     .get()
+                                                     .collect(Collectors.toList());
+            assertEquals(2, elements.size());
+
+            Heading heading = elements.stream()
+                                      .findFirst()
+                                      .flatMap(Element::asHeading)
+                                      .get();
+            Link link = elements.stream()
+                                .skip(1)
+                                .findFirst()
+                                .flatMap(Element::asLink)
+                                .get();
+
+            assertEquals("Title", heading.getText());
+            assertEquals(0, heading.getCustomIds()
+                                   .size());
+
+            assertEquals("Label", link.getLabel());
+            assertEquals(0, link.getCustomIds()
+                                .size());
+            assertEquals("http://link", link.getLink());
+            assertEquals("tooltip", link.getTooltip());
+        }
     }
 
     @Test
