@@ -1034,7 +1034,7 @@ public class MarkdownUtils
         private final Element                 element;
         private final Consumer<List<Element>> elementsProcessor;
 
-        private boolean childrenProcessing = true;
+        private boolean                       childrenProcessing = true;
 
         private ProcessorControlImpl(Element element, Consumer<List<Element>> elementsProcessor)
         {
@@ -1168,14 +1168,13 @@ public class MarkdownUtils
         public void visit(org.commonmark.node.Image image)
         {
             AtomicReference<String> label = new AtomicReference<>();
-            image.accept(new AbstractVisitor()
-            {
+            image.accept(new AbstractVisitor() {
                 @Override
                 public void visit(org.commonmark.node.Text text)
                 {
                     label.updateAndGet(previous -> Optional.ofNullable(previous)
                                                            .orElse("")
-                            + text.getLiteral());
+                                                   + text.getLiteral());
                 }
             });
             this.elementConsumer.accept(new Image(image.getDestination(), label.get(), image.getTitle()));
@@ -1354,8 +1353,7 @@ public class MarkdownUtils
 
     public static MarkdownDocumentBuilder builder()
     {
-        return new MarkdownDocumentBuilder()
-        {
+        return new MarkdownDocumentBuilder() {
             private StringBuilder stringBuilder      = new StringBuilder();
             private String        lineBreakCharacter = "\n";
 
@@ -1388,8 +1386,7 @@ public class MarkdownUtils
             @Override
             public MarkdownDocument build()
             {
-                return new MarkdownDocument()
-                {
+                return new MarkdownDocument() {
                     @Override
                     public String get()
                     {
@@ -1431,8 +1428,7 @@ public class MarkdownUtils
                 MarkdownDocumentBuilder documentBuilder = this;
 
                 this.addRawLineBreak();
-                MarkdownParagraphBuilder paragraphBuilder = new MarkdownParagraphBuilder()
-                {
+                MarkdownParagraphBuilder paragraphBuilder = new MarkdownParagraphBuilder() {
                     @Override
                     public MarkdownParagraphBuilder addText(String text)
                     {
@@ -1492,20 +1488,20 @@ public class MarkdownUtils
                                                .map(value -> StringUtils.replace(value, PIPE, PIPE_REPLACEMENT))
                                                .map(StringUtils::defaultString)
                                                .collect(Collectors.joining(PIPE))
-                        + PIPE);
+                                   + PIPE);
                 this.appendRawLine(PIPE + table.getEffectiveColumns()
                                                .stream()
                                                .map(org.omnaest.utils.table.domain.Column::getTitle)
                                                .map(content -> StringUtils.repeat("-", Math.max(3, StringUtils.length(content))))
                                                .collect(Collectors.joining(PIPE))
-                        + PIPE);
+                                   + PIPE);
                 table.getRows()
                      .stream()
                      .forEach(row -> this.appendRawLine(PIPE + row.stream()
                                                                   .map(StringUtils::defaultString)
                                                                   .map(value -> StringUtils.replace(value, PIPE, PIPE_REPLACEMENT))
                                                                   .collect(Collectors.joining(PIPE))
-                             + PIPE));
+                                                        + PIPE));
                 return this;
             }
 
