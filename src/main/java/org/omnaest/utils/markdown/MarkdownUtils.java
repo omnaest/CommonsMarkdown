@@ -24,9 +24,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -45,13 +47,18 @@ import org.commonmark.node.BulletList;
 import org.commonmark.node.CustomBlock;
 import org.commonmark.node.CustomNode;
 import org.commonmark.node.Emphasis;
+import org.commonmark.node.FencedCodeBlock;
+import org.commonmark.node.HardLineBreak;
+import org.commonmark.node.HtmlInline;
+import org.commonmark.node.IndentedCodeBlock;
 import org.commonmark.node.Node;
 import org.commonmark.node.SoftLineBreak;
+import org.commonmark.node.StrongEmphasis;
 import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
 import org.omnaest.utils.ConsumerUtils;
+import org.omnaest.utils.EnumUtils;
 import org.omnaest.utils.FileUtils;
-import org.omnaest.utils.JSONHelper;
 import org.omnaest.utils.MapperUtils;
 import org.omnaest.utils.MatcherUtils;
 import org.omnaest.utils.PredicateUtils;
@@ -67,6 +74,34 @@ import org.omnaest.utils.markdown.MarkdownUtils.Table.Row;
  */
 public class MarkdownUtils
 {
+    /**
+     * A custom id token is a single word wrapped into curly braces, like <code>{GRID}</code> or <code>{#anchor}</code>. The token is deliberately narrow so that
+     * ordinary curly braces within the content, like a JSON example, are left untouched instead of being swallowed as a {@link CustomIdentifier}.
+     *
+     * @see MarkdownParseOptions#enableParseCustomIdTokens()
+     */
+    private static final String CUSTOM_ID_TOKEN_REGEX = "\\{(#?[a-zA-Z0-9_.\\-]+)\\}";
+
+    /**
+     * Clones the given child {@link Element}s and keeps only those matching the given inclusion filter.
+     *
+     * @see Element#cloneAndFilter(Predicate)
+     * @param elements
+     * @param inclusionFilter
+     * @return
+     */
+    @SuppressWarnings("unchecked")
+    private static <E extends Element> List<E> cloneAndFilterElements(List<E> elements, Predicate<Element> inclusionFilter)
+    {
+        return Optional.ofNullable(elements)
+                       .orElse(Collections.emptyList())
+                       .stream()
+                       .map(element -> (Optional<E>) element.cloneAndFilter(inclusionFilter))
+                       .filter(PredicateUtils.filterNonEmptyOptional())
+                       .map(MapperUtils.mapOptionalToValue())
+                       .collect(Collectors.toList());
+    }
+
     private static class MarkdownParsedDocumentImpl implements MarkdownParsedDocument
     {
         private final List<Element> elements;
@@ -110,12 +145,8 @@ public class MarkdownUtils
         @Override
         public MarkdownParsedDocument clearCustomTokens()
         {
-            return new MarkdownParsedDocumentImpl(this.elements.stream()
-                                                               .map(element -> element.cloneAndFilter(clonedElement -> !clonedElement.asCustomIdentifier()
-                                                                                                                                     .isPresent()))
-                                                               .filter(PredicateUtils.filterNonEmptyOptional())
-                                                               .map(MapperUtils.mapOptionalToValue())
-                                                               .collect(Collectors.toList()));
+            return new MarkdownParsedDocumentImpl(cloneAndFilterElements(this.elements, element -> !element.asCustomIdentifier()
+                                                                                                          .isPresent()));
         }
     }
 
@@ -193,6 +224,31 @@ public class MarkdownUtils
             return as(Text.class);
         }
 
+        public default Optional<Code> asCode()
+        {
+            return as(Code.class);
+        }
+
+        public default Optional<CodeBlock> asCodeBlock()
+        {
+            return as(CodeBlock.class);
+        }
+
+        public default Optional<Html> asHtml()
+        {
+            return as(Html.class);
+        }
+
+        public default Optional<HtmlBlock> asHtmlBlock()
+        {
+            return as(HtmlBlock.class);
+        }
+
+        public default Optional<ThematicBreak> asThematicBreak()
+        {
+            return as(ThematicBreak.class);
+        }
+
         public default Optional<CustomIdentifier> asCustomIdentifier()
         {
             return as(CustomIdentifier.class);
@@ -249,6 +305,17 @@ public class MarkdownUtils
         public default Optional<ElementWithChildren> asElementWithChildren()
         {
             return as(ElementWithChildren.class);
+        }
+
+        /**
+         * Returns the line number, starting at 1, of the markdown source this {@link Element} was parsed from. Returns {@link Optional#empty()} for
+         * {@link Element} types that do not track their origin.
+         *
+         * @return
+         */
+        public default Optional<Integer> getSourceLine()
+        {
+            return Optional.empty();
         }
 
         public Optional<? extends Element> cloneAndFilter(Predicate<Element> inclusionFilter);
@@ -312,11 +379,7 @@ public class MarkdownUtils
             @Override
             public Optional<Row> cloneAndFilter(Predicate<Element> inclusionFilter)
             {
-                return Optional.ofNullable(new Row(this.cells.stream()
-                                                             .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                             .filter(PredicateUtils.filterNonEmptyOptional())
-                                                             .map(MapperUtils.mapOptionalToValue())
-                                                             .collect(Collectors.toList())))
+                return Optional.of(new Row(cloneAndFilterElements(this.cells, inclusionFilter)))
                                .filter(inclusionFilter);
             }
         }
@@ -328,6 +391,11 @@ public class MarkdownUtils
                 super(elements);
             }
 
+            public Cell(List<Element> elements, Alignment alignment)
+            {
+                super(elements, alignment);
+            }
+
             @Override
             public String toString()
             {
@@ -337,24 +405,47 @@ public class MarkdownUtils
             @Override
             public Optional<Cell> cloneAndFilter(Predicate<Element> inclusionFilter)
             {
-                return Optional.ofNullable(new Cell(this.getElements()
-                                                        .stream()
-                                                        .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                        .filter(PredicateUtils.filterNonEmptyOptional())
-                                                        .map(MapperUtils.mapOptionalToValue())
-                                                        .collect(Collectors.toList())))
+                return Optional.of(new Cell(cloneAndFilterElements(this.getElements(), inclusionFilter), this.getAlignment()
+                                                                                                            .orElse(null)))
                                .filter(inclusionFilter);
             }
+        }
+
+        /**
+         * Horizontal alignment of a table {@link Column}, declared by the colons of the delimiter row like <code>|:--|:-:|--:|</code>.
+         *
+         * @author omnaest
+         */
+        public static enum Alignment
+        {
+            LEFT, CENTER, RIGHT
         }
 
         public static class Column implements ElementWithChildren
         {
             private List<Element> elements;
+            private Alignment     alignment;
 
             public Column(List<Element> elements)
             {
+                this(elements, null);
+            }
+
+            public Column(List<Element> elements, Alignment alignment)
+            {
                 super();
                 this.elements = elements;
+                this.alignment = alignment;
+            }
+
+            /**
+             * Returns the horizontal alignment declared for this column. Returns {@link Optional#empty()} if the delimiter row does not declare one.
+             *
+             * @return
+             */
+            public Optional<Alignment> getAlignment()
+            {
+                return Optional.ofNullable(this.alignment);
             }
 
             public List<Element> getElements()
@@ -374,7 +465,7 @@ public class MarkdownUtils
             @Override
             public String toString()
             {
-                return "Column [elements=" + this.elements + "]";
+                return "Column [alignment=" + this.alignment + ", elements=" + this.elements + "]";
             }
 
             @Override
@@ -386,11 +477,7 @@ public class MarkdownUtils
             @Override
             public Optional<? extends Column> cloneAndFilter(Predicate<Element> inclusionFilter)
             {
-                return Optional.ofNullable(new Column(this.elements.stream()
-                                                                   .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                                   .filter(PredicateUtils.filterNonEmptyOptional())
-                                                                   .map(MapperUtils.mapOptionalToValue())
-                                                                   .collect(Collectors.toList())))
+                return Optional.of(new Column(cloneAndFilterElements(this.elements, inclusionFilter), this.alignment))
                                .filter(inclusionFilter);
             }
 
@@ -462,16 +549,8 @@ public class MarkdownUtils
         @Override
         public Optional<Table> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new Table(this.rows.stream()
-                                                          .map(row -> row.cloneAndFilter(inclusionFilter))
-                                                          .filter(PredicateUtils.filterNonEmptyOptional())
-                                                          .map(MapperUtils.mapOptionalToValue())
-                                                          .collect(Collectors.toList()),
-                                                 this.columns.stream()
-                                                             .map(column -> column.cloneAndFilter(inclusionFilter))
-                                                             .filter(PredicateUtils.filterNonEmptyOptional())
-                                                             .map(MapperUtils.mapOptionalToValue())
-                                                             .collect(Collectors.toList())))
+            return Optional.of(new Table(cloneAndFilterElements(this.rows, inclusionFilter),
+                                                 cloneAndFilterElements(this.columns, inclusionFilter)))
                            .filter(inclusionFilter);
         }
 
@@ -479,16 +558,44 @@ public class MarkdownUtils
 
     public static class LineBreak implements Element
     {
+        private final boolean hard;
+
+        public LineBreak()
+        {
+            this(false);
+        }
+
+        /**
+         * @param hard
+         *            true for an explicit line break (a line ending with two spaces or a backslash), false for a soft line break (a simple newline within a
+         *            paragraph)
+         */
+        public LineBreak(boolean hard)
+        {
+            super();
+            this.hard = hard;
+        }
+
+        /**
+         * Returns true if the author requested this break explicitly, e.g. by ending the line with two spaces or a backslash.
+         *
+         * @return
+         */
+        public boolean isHard()
+        {
+            return this.hard;
+        }
+
         @Override
         public String toString()
         {
-            return "LineBreak []";
+            return "LineBreak [hard=" + this.hard + "]";
         }
 
         @Override
         public Optional<LineBreak> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new LineBreak())
+            return Optional.of(new LineBreak(this.hard))
                            .filter(inclusionFilter);
         }
     }
@@ -497,12 +604,32 @@ public class MarkdownUtils
     {
         private String  value;
         private boolean bold;
+        private boolean italic;
+        private Integer sourceLine;
 
         public Text(String value, boolean bold)
+        {
+            this(value, bold, false);
+        }
+
+        public Text(String value, boolean bold, boolean italic)
+        {
+            this(value, bold, italic, null);
+        }
+
+        public Text(String value, boolean bold, boolean italic, Integer sourceLine)
         {
             super();
             this.value = value;
             this.bold = bold;
+            this.italic = italic;
+            this.sourceLine = sourceLine;
+        }
+
+        @Override
+        public Optional<Integer> getSourceLine()
+        {
+            return Optional.ofNullable(this.sourceLine);
         }
 
         public String getValue()
@@ -510,24 +637,217 @@ public class MarkdownUtils
             return this.value;
         }
 
+        /**
+         * Returns true if this {@link Text} is wrapped into a strong emphasis, which is the double asterisk or underscore markup like {@code **bold**}.
+         *
+         * @see #isItalic()
+         * @return
+         */
         public boolean isBold()
         {
             return this.bold;
         }
 
+        /**
+         * Returns true if this {@link Text} is wrapped into an emphasis, which is the single asterisk or underscore markup like {@code *italic*}.
+         *
+         * @see #isBold()
+         * @return
+         */
+        public boolean isItalic()
+        {
+            return this.italic;
+        }
+
         @Override
         public String toString()
         {
-            return "Text [value=" + this.value + ", bold=" + this.bold + "]";
+            return "Text [value=" + this.value + ", bold=" + this.bold + ", italic=" + this.italic + "]";
         }
 
         @Override
         public Optional<Text> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new Text(this.value, this.bold))
+            return Optional.of(new Text(this.value, this.bold, this.italic, this.sourceLine))
                            .filter(inclusionFilter);
         }
 
+    }
+
+    /**
+     * Inline code, which is the single backtick markup like {@code `code`}.
+     *
+     * @see CodeBlock
+     * @author omnaest
+     */
+    public static class Code implements Element
+    {
+        private final String value;
+
+        public Code(String value)
+        {
+            super();
+            this.value = value;
+        }
+
+        public String getValue()
+        {
+            return this.value;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Code [value=" + this.value + "]";
+        }
+
+        @Override
+        public Optional<Code> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new Code(this.value))
+                           .filter(inclusionFilter);
+        }
+    }
+
+    /**
+     * A block of code, either fenced by triple backticks or indented by four spaces. A fenced block can declare a {@link #getLanguage()}.
+     *
+     * @see Code
+     * @author omnaest
+     */
+    public static class CodeBlock implements Element
+    {
+        private final String value;
+        private final String language;
+
+        public CodeBlock(String value, String language)
+        {
+            super();
+            this.value = value;
+            this.language = language;
+        }
+
+        public String getValue()
+        {
+            return this.value;
+        }
+
+        /**
+         * Returns the info string of a fenced code block, which is the language token like the {@code java} in {@code ```java}. Returns
+         * {@link Optional#empty()} for an indented code block or a fenced block without info string.
+         *
+         * @return
+         */
+        public Optional<String> getLanguage()
+        {
+            return Optional.ofNullable(this.language)
+                           .filter(StringUtils::isNotBlank);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "CodeBlock [language=" + this.language + ", value=" + this.value + "]";
+        }
+
+        @Override
+        public Optional<CodeBlock> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new CodeBlock(this.value, this.language))
+                           .filter(inclusionFilter);
+        }
+    }
+
+    /**
+     * Raw inline html like the <code>&lt;b&gt;</code> of <code>text &lt;b&gt;bold&lt;/b&gt; text</code>. The text around and within the tags is provided as
+     * regular {@link Text}, this element carries the tag itself.
+     *
+     * @see HtmlBlock
+     * @author omnaest
+     */
+    public static class Html implements Element
+    {
+        private final String value;
+
+        public Html(String value)
+        {
+            super();
+            this.value = value;
+        }
+
+        public String getValue()
+        {
+            return this.value;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Html [value=" + this.value + "]";
+        }
+
+        @Override
+        public Optional<Html> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new Html(this.value))
+                           .filter(inclusionFilter);
+        }
+    }
+
+    /**
+     * A block of raw html, which is a block level element starting with an html tag. Its content is not interpreted as markdown at all.
+     *
+     * @see Html
+     * @author omnaest
+     */
+    public static class HtmlBlock implements Element
+    {
+        private final String value;
+
+        public HtmlBlock(String value)
+        {
+            super();
+            this.value = value;
+        }
+
+        public String getValue()
+        {
+            return this.value;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "HtmlBlock [value=" + this.value + "]";
+        }
+
+        @Override
+        public Optional<HtmlBlock> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new HtmlBlock(this.value))
+                           .filter(inclusionFilter);
+        }
+    }
+
+    /**
+     * A horizontal separator line, written as three or more asterisks, dashes or underscores on a line of their own.
+     *
+     * @author omnaest
+     */
+    public static class ThematicBreak implements Element
+    {
+        @Override
+        public String toString()
+        {
+            return "ThematicBreak []";
+        }
+
+        @Override
+        public Optional<ThematicBreak> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new ThematicBreak())
+                           .filter(inclusionFilter);
+        }
     }
 
     public static class CustomIdentifier implements Element
@@ -558,7 +878,7 @@ public class MarkdownUtils
         @Override
         public Optional<CustomIdentifier> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new CustomIdentifier(this.identifier))
+            return Optional.of(new CustomIdentifier(this.identifier))
                            .filter(inclusionFilter);
         }
     }
@@ -566,11 +886,29 @@ public class MarkdownUtils
     public static class BasicList implements ElementWithChildren
     {
         private List<Element> elements;
+        private boolean       tight;
 
         public BasicList(List<Element> elements)
         {
+            this(elements, true);
+        }
+
+        public BasicList(List<Element> elements, boolean tight)
+        {
             super();
             this.elements = elements;
+            this.tight = tight;
+        }
+
+        /**
+         * Returns true for a list whose items are not separated by blank lines. A loose list, which is the opposite, is usually rendered with more spacing
+         * between its items.
+         *
+         * @return
+         */
+        public boolean isTight()
+        {
+            return this.tight;
         }
 
         public List<Element> getElements()
@@ -587,17 +925,15 @@ public class MarkdownUtils
         @Override
         public String toString()
         {
-            return "BasicList [elements=" + this.elements + "]";
+            return this.getClass()
+                       .getSimpleName()
+                + " [tight=" + this.tight + ", elements=" + this.elements + "]";
         }
 
         @Override
         public Optional<? extends BasicList> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new BasicList(this.elements.stream()
-                                                                  .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                                  .filter(PredicateUtils.filterNonEmptyOptional())
-                                                                  .map(MapperUtils.mapOptionalToValue())
-                                                                  .collect(Collectors.toList())))
+            return Optional.of(new BasicList(cloneAndFilterElements(this.elements, inclusionFilter), this.tight))
                            .filter(inclusionFilter);
         }
     }
@@ -609,35 +945,54 @@ public class MarkdownUtils
             super(elements);
         }
 
+        public UnorderedList(List<Element> elements, boolean tight)
+        {
+            super(elements, tight);
+        }
+
         @Override
         public Optional<UnorderedList> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new UnorderedList(this.getElements()
-                                                             .stream()
-                                                             .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                             .filter(PredicateUtils.filterNonEmptyOptional())
-                                                             .map(MapperUtils.mapOptionalToValue())
-                                                             .collect(Collectors.toList())))
+            return Optional.of(new UnorderedList(cloneAndFilterElements(this.getElements(), inclusionFilter), this.isTight()))
                            .filter(inclusionFilter);
         }
     }
 
     public static class OrderedList extends BasicList
     {
+        private int startNumber;
+
         public OrderedList(List<Element> elements)
         {
-            super(elements);
+            this(elements, 1, true);
+        }
+
+        public OrderedList(List<Element> elements, int startNumber, boolean tight)
+        {
+            super(elements, tight);
+            this.startNumber = startNumber;
+        }
+
+        /**
+         * Returns the number the list starts counting at, which is 1 for a regular list and e.g. 5 for a list written as <code>5. first item</code>.
+         *
+         * @return
+         */
+        public int getStartNumber()
+        {
+            return this.startNumber;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "OrderedList [startNumber=" + this.startNumber + ", tight=" + this.isTight() + ", elements=" + this.getElements() + "]";
         }
 
         @Override
         public Optional<OrderedList> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new OrderedList(this.getElements()
-                                                           .stream()
-                                                           .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                           .filter(PredicateUtils.filterNonEmptyOptional())
-                                                           .map(MapperUtils.mapOptionalToValue())
-                                                           .collect(Collectors.toList())))
+            return Optional.of(new OrderedList(cloneAndFilterElements(this.getElements(), inclusionFilter), this.startNumber, this.isTight()))
                            .filter(inclusionFilter);
         }
     }
@@ -746,12 +1101,7 @@ public class MarkdownUtils
         @Override
         public Optional<Heading> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new Heading(this.level, this.getElements()
-                                                                   .stream()
-                                                                   .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                                   .filter(PredicateUtils.filterNonEmptyOptional())
-                                                                   .map(MapperUtils.mapOptionalToValue())
-                                                                   .collect(Collectors.toList())))
+            return Optional.of(new Heading(this.level, cloneAndFilterElements(this.getElements(), inclusionFilter)))
                            .filter(inclusionFilter);
         }
 
@@ -762,13 +1112,26 @@ public class MarkdownUtils
         private String        link;
         private String        tooltip;
         private List<Element> elements;
+        private Integer       sourceLine;
 
         public Link(String link, List<Element> elements, String tooltip)
+        {
+            this(link, elements, tooltip, null);
+        }
+
+        public Link(String link, List<Element> elements, String tooltip, Integer sourceLine)
         {
             super();
             this.link = link;
             this.elements = elements;
             this.tooltip = tooltip;
+            this.sourceLine = sourceLine;
+        }
+
+        @Override
+        public Optional<Integer> getSourceLine()
+        {
+            return Optional.ofNullable(this.sourceLine);
         }
 
         public String getLink()
@@ -778,24 +1141,37 @@ public class MarkdownUtils
 
         public String getLabel()
         {
+            return this.getElements()
+                       .stream()
+                       .map(element -> element.asText()
+                                              .map(Text::getValue)
+                                              .orElseGet(() -> element.asCode()
+                                                                      .map(Code::getValue)
+                                                                      .orElse("")))
+                       .collect(Collectors.joining());
+        }
+
+        /**
+         * Returns the {@link Element}s the label of this {@link Link} is composed of, which allows to access markup the flattened {@link #getLabel()} cannot
+         * express, like a nested {@link Image}.
+         *
+         * @return
+         */
+        public List<Element> getElements()
+        {
             return Optional.ofNullable(this.elements)
-                           .orElse(Collections.emptyList())
-                           .stream()
-                           .map(Element::asText)
-                           .filter(PredicateUtils.filterNonEmptyOptional())
-                           .map(MapperUtils.mapOptionalToValue())
-                           .map(Text::getValue)
-                           .collect(Collectors.joining());
+                           .orElse(Collections.emptyList());
         }
 
         public List<String> getCustomIds()
         {
-            return this.elements.stream()
-                                .map(Element::asCustomIdentifier)
-                                .filter(Optional::isPresent)
-                                .map(Optional::get)
-                                .map(CustomIdentifier::getIdentifier)
-                                .collect(Collectors.toList());
+            return this.getElements()
+                       .stream()
+                       .map(Element::asCustomIdentifier)
+                       .filter(Optional::isPresent)
+                       .map(Optional::get)
+                       .map(CustomIdentifier::getIdentifier)
+                       .collect(Collectors.toList());
         }
 
         public String getTooltip()
@@ -812,12 +1188,7 @@ public class MarkdownUtils
         @Override
         public Optional<Link> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new Link(this.link, this.elements.stream()
-                                                                        .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                                        .filter(PredicateUtils.filterNonEmptyOptional())
-                                                                        .map(MapperUtils.mapOptionalToValue())
-                                                                        .collect(Collectors.toList()),
-                                                this.tooltip))
+            return Optional.of(new Link(this.link, cloneAndFilterElements(this.elements, inclusionFilter), this.tooltip, this.sourceLine))
                            .filter(inclusionFilter);
         }
     }
@@ -852,11 +1223,7 @@ public class MarkdownUtils
         @Override
         public Optional<Paragraph> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new Paragraph(this.elements.stream()
-                                                                  .map(element -> element.cloneAndFilter(inclusionFilter))
-                                                                  .filter(PredicateUtils.filterNonEmptyOptional())
-                                                                  .map(MapperUtils.mapOptionalToValue())
-                                                                  .collect(Collectors.toList())))
+            return Optional.of(new Paragraph(cloneAndFilterElements(this.elements, inclusionFilter)))
                            .filter(inclusionFilter);
         }
     }
@@ -899,7 +1266,7 @@ public class MarkdownUtils
         @Override
         public Optional<Image> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.ofNullable(new Image(this.link, this.label, this.tooltip))
+            return Optional.of(new Image(this.link, this.label, this.tooltip))
                            .filter(inclusionFilter);
         }
     }
@@ -986,12 +1353,6 @@ public class MarkdownUtils
         {
             this.parseCustomIdTokens = parseCustomIdTokens;
             return this;
-        }
-
-        @Override
-        public MarkdownParseOptions clone()
-        {
-            return JSONHelper.clone(this);
         }
     }
 
@@ -1085,41 +1446,161 @@ public class MarkdownUtils
 
     }
 
+    /**
+     * Maps the alignment of a commonmark table cell onto the {@link Table.Alignment} of this api. Returns null if no alignment is declared.
+     *
+     * @param alignment
+     * @return
+     */
+    private static Table.Alignment determineAlignment(TableCell.Alignment alignment)
+    {
+        return EnumUtils.mapByName(alignment, Table.Alignment.class)
+                        .orElse(null);
+    }
+
+    /**
+     * Determines the line number, starting at 1, of the given commonmark {@link Node}. Returns null if the parser did not attach any source span to it.
+     *
+     * @param node
+     * @return
+     */
+    private static Integer determineSourceLine(Node node)
+    {
+        return Optional.ofNullable(node)
+                       .map(Node::getSourceSpans)
+                       .filter(PredicateUtils.listNotEmpty())
+                       .map(sourceSpans -> sourceSpans.get(0))
+                       .map(sourceSpan -> sourceSpan.getLineIndex() + 1)
+                       .orElse(null);
+    }
+
     private static class ElementConsumerDrivenVisitor extends AbstractVisitor
     {
         private final Consumer<Element> elementConsumer;
-        private boolean                 bold = false;
+        private final boolean           inheritedBold;
+        private final boolean           inheritedItalic;
+        private boolean                 bold   = false;
+        private boolean                 italic = false;
         private MarkdownParseOptions    options;
 
         private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options)
         {
-            this.elementConsumer = elementConsumer;
-            this.options = options;
+            this(elementConsumer, options, false, false);
         }
 
+        /**
+         * A nested {@link Element} like a {@link Heading} or {@link Link} is visited by an own {@link ElementConsumerDrivenVisitor}, so any surrounding emphasis
+         * has to be handed over explicitly to not get lost on the way down.
+         */
+        private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options, boolean inheritedBold, boolean inheritedItalic)
+        {
+            this.elementConsumer = elementConsumer;
+            this.options = options;
+            this.inheritedBold = inheritedBold;
+            this.inheritedItalic = inheritedItalic;
+        }
+
+        private ElementConsumerDrivenVisitor newChildVisitor(Consumer<Element> elementConsumer)
+        {
+            return new ElementConsumerDrivenVisitor(elementConsumer, this.options, this.isBold(), this.isItalic());
+        }
+
+        private boolean isBold()
+        {
+            return this.bold || this.inheritedBold;
+        }
+
+        private boolean isItalic()
+        {
+            return this.italic || this.inheritedItalic;
+        }
+
+        /**
+         * Single asterisk or underscore markup like {@code *italic*}.
+         *
+         * @see #visit(StrongEmphasis)
+         */
         @Override
         public void visit(Emphasis emphasis)
         {
-            String openingDelimiter = emphasis.getOpeningDelimiter();
-            boolean isBold = org.apache.commons.lang3.StringUtils.equals("*", openingDelimiter);
-            if (isBold)
-            {
-                this.bold = true;
-            }
+            boolean previousItalic = this.italic;
+            this.italic = true;
 
             super.visit(emphasis);
 
-            if (isBold)
-            {
-                this.bold = false;
-            }
+            this.italic = previousItalic;
+        }
+
+        /**
+         * Double asterisk or underscore markup like {@code **bold**}, which is a node type of its own and not an {@link Emphasis} with another delimiter.
+         *
+         * @see #visit(Emphasis)
+         */
+        @Override
+        public void visit(StrongEmphasis strongEmphasis)
+        {
+            boolean previousBold = this.bold;
+            this.bold = true;
+
+            super.visit(strongEmphasis);
+
+            this.bold = previousBold;
         }
 
         @Override
         public void visit(SoftLineBreak softLineBreak)
         {
-            this.elementConsumer.accept(new LineBreak());
+            this.elementConsumer.accept(new LineBreak(false));
             super.visit(softLineBreak);
+        }
+
+        @Override
+        public void visit(HardLineBreak hardLineBreak)
+        {
+            this.elementConsumer.accept(new LineBreak(true));
+            super.visit(hardLineBreak);
+        }
+
+        @Override
+        public void visit(org.commonmark.node.Code code)
+        {
+            this.elementConsumer.accept(new Code(code.getLiteral()));
+            super.visit(code);
+        }
+
+        @Override
+        public void visit(org.commonmark.node.HtmlBlock htmlBlock)
+        {
+            this.elementConsumer.accept(new HtmlBlock(htmlBlock.getLiteral()));
+            super.visit(htmlBlock);
+        }
+
+        @Override
+        public void visit(HtmlInline htmlInline)
+        {
+            this.elementConsumer.accept(new Html(htmlInline.getLiteral()));
+            super.visit(htmlInline);
+        }
+
+        @Override
+        public void visit(org.commonmark.node.ThematicBreak thematicBreak)
+        {
+            this.elementConsumer.accept(new ThematicBreak());
+            super.visit(thematicBreak);
+        }
+
+        @Override
+        public void visit(FencedCodeBlock fencedCodeBlock)
+        {
+            this.elementConsumer.accept(new CodeBlock(fencedCodeBlock.getLiteral(), fencedCodeBlock.getInfo()));
+            super.visit(fencedCodeBlock);
+        }
+
+        @Override
+        public void visit(IndentedCodeBlock indentedCodeBlock)
+        {
+            this.elementConsumer.accept(new CodeBlock(indentedCodeBlock.getLiteral(), null));
+            super.visit(indentedCodeBlock);
         }
 
         @Override
@@ -1127,12 +1608,12 @@ public class MarkdownUtils
         {
             String value = text.getLiteral();
             String nonInterpretableValue = this.options.isParseCustomIdTokens() ? MatcherUtils.interpreter()
-                                                                                              .ifContainsRegEx("\\{([^\\}]*)\\}",
+                                                                                              .ifContainsRegEx(CUSTOM_ID_TOKEN_REGEX,
                                                                                                                customIdMatch -> customIdMatch.getSubGroupsAsStream()
                                                                                                                                              .forEach(group -> this.elementConsumer.accept(new CustomIdentifier(group))))
                                                                                               .apply(value)
                     : value;
-            this.elementConsumer.accept(new Text(nonInterpretableValue, this.bold));
+            this.elementConsumer.accept(new Text(nonInterpretableValue, this.isBold(), this.isItalic(), determineSourceLine(text)));
             super.visit(text);
         }
 
@@ -1141,27 +1622,16 @@ public class MarkdownUtils
         {
             int level = heading.getLevel();
             List<Element> elements = new ArrayList<>();
-            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(heading);
+            this.newChildVisitor(elements::add).visitChildren(heading);
             this.elementConsumer.accept(new Heading(level, elements));
         }
 
         @Override
         public void visit(org.commonmark.node.Link link)
         {
-            //            AtomicReference<String> label = new AtomicReference<>();
-            //            link.accept(new AbstractVisitor()
-            //            {
-            //                @Override
-            //                public void visit(org.commonmark.node.Text text)
-            //                {
-            //                    label.updateAndGet(previous -> Optional.ofNullable(previous)
-            //                                                           .orElse("")
-            //                            + text.getLiteral());
-            //                }
-            //            });
             List<Element> elements = new ArrayList<>();
-            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(link);
-            this.elementConsumer.accept(new Link(link.getDestination(), elements, link.getTitle()));
+            this.newChildVisitor(elements::add).visitChildren(link);
+            this.elementConsumer.accept(new Link(link.getDestination(), elements, link.getTitle(), determineSourceLine(link)));
         }
 
         @Override
@@ -1186,7 +1656,7 @@ public class MarkdownUtils
             if (this.options.isWrapIntoParagraphs())
             {
                 List<Element> elements = new ArrayList<>();
-                new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(paragraph);
+                this.newChildVisitor(elements::add).visitChildren(paragraph);
                 this.elementConsumer.accept(new Paragraph(elements));
             }
             else
@@ -1199,16 +1669,16 @@ public class MarkdownUtils
         public void visit(BulletList bulletList)
         {
             List<Element> elements = new ArrayList<>();
-            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(bulletList);
-            this.elementConsumer.accept(new UnorderedList(elements));
+            this.newChildVisitor(elements::add).visitChildren(bulletList);
+            this.elementConsumer.accept(new UnorderedList(elements, bulletList.isTight()));
         }
 
         @Override
         public void visit(org.commonmark.node.OrderedList orderedList)
         {
             List<Element> elements = new ArrayList<>();
-            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(orderedList);
-            this.elementConsumer.accept(new OrderedList(elements));
+            this.newChildVisitor(elements::add).visitChildren(orderedList);
+            this.elementConsumer.accept(new OrderedList(elements, orderedList.getStartNumber(), orderedList.isTight()));
         }
 
         @Override
@@ -1256,7 +1726,8 @@ public class MarkdownUtils
             }
             else if (customNode instanceof TableCell)
             {
-                this.elementConsumer.accept(new Table.Cell(this.parseChildrenElements(customNode)));
+                this.elementConsumer.accept(new Table.Cell(this.parseChildrenElements(customNode),
+                                                           determineAlignment(((TableCell) customNode).getAlignment())));
             }
             else if (customNode instanceof TableBody)
             {
@@ -1272,7 +1743,7 @@ public class MarkdownUtils
         private List<Element> parseChildrenElements(Node node)
         {
             List<Element> elements = new ArrayList<>();
-            new ElementConsumerDrivenVisitor(elements::add, this.options).visitChildren(node);
+            this.newChildVisitor(elements::add).visitChildren(node);
             return elements;
         }
 
@@ -1298,6 +1769,85 @@ public class MarkdownUtils
         public MarkdownDocumentBuilder addHeading(HeadingStrength headingStrength, String heading);
 
         public MarkdownDocumentBuilder addLink(String label, String link, String tooltip);
+
+        /**
+         * Adds an image, e.g. <code>![label](link)</code>.
+         *
+         * @param label
+         * @param link
+         * @return
+         */
+        public MarkdownDocumentBuilder addImage(String label, String link);
+
+        /**
+         * Adds bold text, e.g. <code>**text**</code>.
+         *
+         * @see #addItalicText(String)
+         * @param text
+         * @return
+         */
+        public MarkdownDocumentBuilder addBoldText(String text);
+
+        /**
+         * Adds italic text, e.g. <code>*text*</code>.
+         *
+         * @see #addBoldText(String)
+         * @param text
+         * @return
+         */
+        public MarkdownDocumentBuilder addItalicText(String text);
+
+        /**
+         * Adds inline code, e.g. <code>`code`</code>.
+         *
+         * @see #addCodeBlock(String, String)
+         * @param code
+         * @return
+         */
+        public MarkdownDocumentBuilder addCode(String code);
+
+        /**
+         * Adds a fenced code block, e.g. <code>```java</code>. The language can be null.
+         *
+         * @see #addCode(String)
+         * @param code
+         * @param language
+         * @return
+         */
+        public MarkdownDocumentBuilder addCodeBlock(String code, String language);
+
+        /**
+         * Adds an unordered list with one entry per given text.
+         *
+         * @see #addOrderedList(Collection)
+         * @param texts
+         * @return
+         */
+        public MarkdownDocumentBuilder addUnorderedList(Collection<String> texts);
+
+        /**
+         * Adds an ordered list with one entry per given text.
+         *
+         * @see #addUnorderedList(Collection)
+         * @param texts
+         * @return
+         */
+        public MarkdownDocumentBuilder addOrderedList(Collection<String> texts);
+
+        /**
+         * Adds a block quote with one quoted line per given text.
+         *
+         * @param texts
+         * @return
+         */
+        public MarkdownDocumentBuilder addBlockQuote(Collection<String> texts);
+
+        /**
+         * Adds a horizontal separator line.
+         *
+         * @return
+         */
+        public MarkdownDocumentBuilder addThematicBreak();
 
         public MarkdownDocumentBuilder addParagraph(Consumer<MarkdownParagraphBuilder> paragraphBuilderConsumer);
 
@@ -1374,6 +1924,84 @@ public class MarkdownUtils
             public MarkdownDocumentBuilder addLink(String label, String link, String tooltip)
             {
                 this.appendRawLine("[" + label + "](" + link + " \"" + tooltip + "\")");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addImage(String label, String link)
+            {
+                this.appendRawLine("![" + StringUtils.defaultString(label) + "](" + StringUtils.defaultString(link) + ")");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addBoldText(String text)
+            {
+                this.appendRawLine("**" + StringUtils.defaultString(text) + "**");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addItalicText(String text)
+            {
+                this.appendRawLine("*" + StringUtils.defaultString(text) + "*");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addCode(String code)
+            {
+                this.appendRawLine("`" + StringUtils.defaultString(code) + "`");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addCodeBlock(String code, String language)
+            {
+                this.addRawLineBreak();
+                this.appendRawLine("```" + StringUtils.defaultString(language));
+                this.appendRawLine(StringUtils.defaultString(code));
+                this.appendRawLine("```");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addUnorderedList(Collection<String> texts)
+            {
+                return this.addList(texts, text -> "* " + StringUtils.defaultString(text));
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addOrderedList(Collection<String> texts)
+            {
+                AtomicInteger counter = new AtomicInteger(1);
+                return this.addList(texts, text -> counter.getAndIncrement() + ". " + StringUtils.defaultString(text));
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addBlockQuote(Collection<String> texts)
+            {
+                return this.addList(texts, text -> "> " + StringUtils.defaultString(text));
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addThematicBreak()
+            {
+                this.addRawLineBreak();
+                this.appendRawLine("***");
+                return this;
+            }
+
+            /**
+             * Writes a block of lines, each of them created by the given line mapper, surrounded by the blank lines a block level element needs.
+             */
+            private MarkdownDocumentBuilder addList(Collection<String> texts, Function<String, String> lineMapper)
+            {
+                this.addRawLineBreak();
+                Optional.ofNullable(texts)
+                        .orElse(Collections.emptyList())
+                        .forEach(text -> this.appendRawLine(lineMapper.apply(text)));
+                this.addRawLineBreak();
                 return this;
             }
 

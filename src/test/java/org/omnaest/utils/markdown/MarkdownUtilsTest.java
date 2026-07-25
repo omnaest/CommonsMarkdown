@@ -18,15 +18,33 @@ package org.omnaest.utils.markdown;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.Ignore;
 import org.junit.Test;
 import org.omnaest.utils.StringUtils;
+import java.util.function.Consumer;
+
+import org.omnaest.utils.markdown.MarkdownUtils.BasicList;
+import org.omnaest.utils.markdown.MarkdownUtils.Code;
+import org.omnaest.utils.markdown.MarkdownUtils.CodeBlock;
+import org.omnaest.utils.markdown.MarkdownUtils.CustomIdentifier;
 import org.omnaest.utils.markdown.MarkdownUtils.Element;
 import org.omnaest.utils.markdown.MarkdownUtils.Heading;
+import org.omnaest.utils.markdown.MarkdownUtils.Html;
+import org.omnaest.utils.markdown.MarkdownUtils.HtmlBlock;
+import org.omnaest.utils.markdown.MarkdownUtils.Image;
+import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocumentBuilder;
+import org.omnaest.utils.markdown.MarkdownUtils.OrderedList;
+import org.omnaest.utils.markdown.MarkdownUtils.Table.Alignment;
+import org.omnaest.utils.markdown.MarkdownUtils.Table.Column;
+import org.omnaest.utils.markdown.MarkdownUtils.ThematicBreak;
+import org.omnaest.utils.markdown.MarkdownUtils.UnorderedList;
 import org.omnaest.utils.markdown.MarkdownUtils.LineBreak;
 import org.omnaest.utils.markdown.MarkdownUtils.Link;
 import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocument;
@@ -716,8 +734,484 @@ public class MarkdownUtilsTest
         MarkdownParsedDocument parsedDocument = MarkdownUtils.parse(markdown);
         assertTrue(parsedDocument.findFirst(LineBreak.class)
                                  .isPresent());
-        assertEquals(1, MarkdownUtils.parse(markdown)
-                                     .getAndFilter(LineBreak.class)
+
+        // the builder writes the explicit break as a line of its own, so the markdown holds a soft break after "abc" and a hard break for the backslash line
+        List<LineBreak> lineBreaks = MarkdownUtils.parse(markdown)
+                                                  .getAndFilter(LineBreak.class)
+                                                  .collect(Collectors.toList());
+        assertEquals(2, lineBreaks.size());
+        assertEquals(Arrays.asList(false, true), lineBreaks.stream()
+                                                           .map(LineBreak::isHard)
+                                                           .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testParseEmphasis() throws Exception
+    {
+        assertEquals(Arrays.asList("italic:false|bold:false"), this.parseTextStyles("plain"));
+        assertEquals(Arrays.asList("italic:true|bold:false"), this.parseTextStyles("*italic*"));
+        assertEquals(Arrays.asList("italic:true|bold:false"), this.parseTextStyles("_italic_"));
+        assertEquals(Arrays.asList("italic:false|bold:true"), this.parseTextStyles("**bold**"));
+        assertEquals(Arrays.asList("italic:false|bold:true"), this.parseTextStyles("__bold__"));
+        assertEquals(Arrays.asList("italic:false|bold:true", "italic:true|bold:true", "italic:false|bold:true"),
+                     this.parseTextStyles("**bold *and italic* again**"));
+    }
+
+    @Test
+    public void testParseEmphasisAroundNestedElement() throws Exception
+    {
+        // the label of the link is parsed by an own visitor, but the surrounding emphasis still applies to it, so the label text in the middle is italic, too
+        assertEquals(Arrays.asList("italic:true|bold:false", "italic:true|bold:false", "italic:true|bold:false"),
+                     this.parseTextStyles("*italic [label](http://link.example) tail*"));
+        assertEquals(Arrays.asList("italic:false|bold:true"), this.parseTextStyles("# **bold heading**"));
+    }
+
+    private List<String> parseTextStyles(String markdown)
+    {
+        return MarkdownUtilsTest.collectContentElements(MarkdownUtils.parse(markdown)
+                                                                     .get())
+                                .stream()
+                                .map(Element::asText)
+                                .filter(Optional::isPresent)
+                                .map(Optional::get)
+                                .map(text -> "italic:" + text.isItalic() + "|bold:" + text.isBold())
+                                .collect(Collectors.toList());
+    }
+
+    @Test
+    public void testParseInlineCode() throws Exception
+    {
+        List<Element> elements = MarkdownUtils.parse("some `inlineCode()` here")
+                                              .get()
+                                              .collect(Collectors.toList());
+        assertEquals(3, elements.size());
+        assertEquals("inlineCode()", elements.get(1)
+                                             .asCode()
+                                             .get()
+                                             .getValue());
+    }
+
+    @Test
+    public void testParseInlineCodeWithinLinkLabel() throws Exception
+    {
+        Link link = MarkdownUtils.parse("[`code` label](http://link.example)")
+                                 .findFirst(Link.class)
+                                 .get();
+        assertEquals("code label", link.getLabel());
+    }
+
+    @Test
+    public void testParseFencedCodeBlock() throws Exception
+    {
+        CodeBlock codeBlock = MarkdownUtils.parse("```java\nint value = 1;\n```\n")
+                                           .findFirst(CodeBlock.class)
+                                           .get();
+        assertEquals("int value = 1;\n", codeBlock.getValue());
+        assertEquals("java", codeBlock.getLanguage()
+                                      .get());
+    }
+
+    @Test
+    public void testParseFencedCodeBlockWithoutLanguage() throws Exception
+    {
+        CodeBlock codeBlock = MarkdownUtils.parse("```\nint value = 1;\n```\n")
+                                           .findFirst(CodeBlock.class)
+                                           .get();
+        assertEquals("int value = 1;\n", codeBlock.getValue());
+        assertEquals(false, codeBlock.getLanguage()
+                                     .isPresent());
+    }
+
+    @Test
+    public void testParseIndentedCodeBlock() throws Exception
+    {
+        CodeBlock codeBlock = MarkdownUtils.parse("    int value = 1;\n")
+                                           .findFirst(CodeBlock.class)
+                                           .get();
+        assertEquals("int value = 1;\n", codeBlock.getValue());
+        assertEquals(false, codeBlock.getLanguage()
+                                     .isPresent());
+    }
+
+    @Test
+    public void testParseHardAndSoftLineBreak() throws Exception
+    {
+        assertEquals(Arrays.asList(true), this.parseLineBreakHardness("line one  \nline two"));
+        assertEquals(Arrays.asList(true), this.parseLineBreakHardness("line one\\\nline two"));
+        assertEquals(Arrays.asList(false), this.parseLineBreakHardness("line one\nline two"));
+    }
+
+    private List<Boolean> parseLineBreakHardness(String markdown)
+    {
+        return MarkdownUtils.parse(markdown)
+                            .getAndFilter(LineBreak.class)
+                            .map(LineBreak::isHard)
+                            .collect(Collectors.toList());
+    }
+
+    @Test
+    public void testParseCustomIdTokens() throws Exception
+    {
+        assertEquals(Arrays.asList("GRID"), this.parseCustomIds("{GRID}Header"));
+        assertEquals(Arrays.asList("#anker"), this.parseCustomIds("# Title{#anker}"));
+        assertEquals(Arrays.asList("BUTTON"), this.parseCustomIds("[Title{BUTTON}](abc)"));
+    }
+
+    @Test
+    public void testParseKeepsOrdinaryCurlyBraces() throws Exception
+    {
+        // only a single word within curly braces is a custom id token, everything else stays part of the content
+        Arrays.asList("Config example: {\"a\":1} done", "before {} after", "see {@code null} here", "a {token with spaces} b")
+              .forEach(markdown ->
+              {
+                  assertEquals("Custom id parsed from: " + markdown, Arrays.asList(), this.parseCustomIds(markdown));
+                  assertEquals("Content lost in: " + markdown, markdown, MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens())
+                                                                                      .findFirst(Text.class)
+                                                                                      .get()
+                                                                                      .getValue());
+              });
+    }
+
+    private List<String> parseCustomIds(String markdown)
+    {
+        return MarkdownUtilsTest.collectContentElements(MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens())
+                                                                    .get())
+                                .stream()
+                                .map(Element::asCustomIdentifier)
+                                .filter(Optional::isPresent)
+                                .map(Optional::get)
+                                .map(CustomIdentifier::getIdentifier)
+                                .collect(Collectors.toList());
+    }
+
+    /**
+     * Characterization test over the whole commonmark surface: every construct below carries a marker word, and none of them may get lost on the way through
+     * the parser. A construct the visitor does not know is dropped silently, so this test is the guard against that.
+     */
+    @Test
+    public void testParseKeepsContentOfAllMarkdownConstructs() throws Exception
+    {
+        String markdown = "# headingText{#headingId}\n" + "\n"
+                + "Some paragraphText with **boldText** and *italicText* and `inlineCodeText` and a [linkLabel](http://link.example) and an "
+                + "![imageAltText](image.example.png).\n" + "\n" + "> quotedText\n" + "\n" + "* firstItemText\n" + "* secondItemText\n" + "\n"
+                + "1. orderedItemText\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "    indentedCodeText\n" + "\n" + "***\n" + "\n"
+                + "<div>htmlBlockText</div>\n" + "\n" + "Text with <b>inlineHtmlText</b> tags.\n" + "\n" + "|columnTitleText|\n" + "|---|\n" + "|cellText|\n";
+        List<String> markers = Arrays.asList("headingText", "headingId", "paragraphText", "boldText", "italicText", "inlineCodeText", "linkLabel",
+                                             "http://link.example", "imageAltText", "image.example.png", "quotedText", "firstItemText", "secondItemText",
+                                             "orderedItemText", "fencedCodeText", "indentedCodeText", "htmlBlockText", "inlineHtmlText", "columnTitleText",
+                                             "cellText");
+
+        Arrays.asList(MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()),
+                      MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()
+                                                                      .enableWrapIntoParagraphs()))
+              .forEach(parsedDocument ->
+              {
+                  String content = MarkdownUtilsTest.collectContent(parsedDocument.get());
+                  markers.forEach(marker -> assertTrue("Content lost by the parser: " + marker + " within <" + content + ">", content.contains(marker)));
+              });
+    }
+
+    @Test
+    public void testParseHtmlBlockAndInlineHtml() throws Exception
+    {
+        assertEquals("<div class=\"x\">\n<p>htmlBlockText</p>\n</div>", MarkdownUtils.parse("<div class=\"x\">\n<p>htmlBlockText</p>\n</div>\n")
+                                                                                       .findFirst(HtmlBlock.class)
+                                                                                       .get()
+                                                                                       .getValue());
+        assertEquals(Arrays.asList("<b>", "</b>"), MarkdownUtils.parse("text with <b>bold</b> tag")
+                                                                .getAndFilter(Html.class)
+                                                                .map(Html::getValue)
+                                                                .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testParseThematicBreak() throws Exception
+    {
+        assertEquals(1, MarkdownUtils.parse("before\n\n***\n\nafter\n")
+                                     .getAndFilter(ThematicBreak.class)
                                      .count());
+    }
+
+    @Test
+    public void testParseOrderedListStartNumber() throws Exception
+    {
+        assertEquals(5, MarkdownUtils.parse("5. fifth\n6. sixth\n")
+                                     .findFirst(OrderedList.class)
+                                     .get()
+                                     .getStartNumber());
+        assertEquals(1, MarkdownUtils.parse("1. first\n")
+                                     .findFirst(OrderedList.class)
+                                     .get()
+                                     .getStartNumber());
+    }
+
+    @Test
+    public void testParseListTightness() throws Exception
+    {
+        assertEquals(true, MarkdownUtils.parse("* a\n* b\n")
+                                        .findFirst(UnorderedList.class)
+                                        .get()
+                                        .isTight());
+        assertEquals(false, MarkdownUtils.parse("* a\n\n* b\n")
+                                         .findFirst(UnorderedList.class)
+                                         .get()
+                                         .isTight());
+    }
+
+    @Test
+    public void testParseTableColumnAlignment() throws Exception
+    {
+        List<Optional<Alignment>> alignments = MarkdownUtils.parse("|a|b|c|d|\n|:--|:-:|--:|--|\n|1|2|3|4|\n")
+                                                            .findFirst(MarkdownUtils.Table.class)
+                                                            .get()
+                                                            .getColumns()
+                                                            .stream()
+                                                            .map(Column::getAlignment)
+                                                            .collect(Collectors.toList());
+        assertEquals(Arrays.asList(Optional.of(Alignment.LEFT), Optional.of(Alignment.CENTER), Optional.of(Alignment.RIGHT), Optional.empty()), alignments);
+    }
+
+    @Test
+    public void testBuildAndParseImage() throws Exception
+    {
+        Image image = MarkdownUtils.builder()
+                                   .addImage("imageLabel", "image.example.png")
+                                   .build()
+                                   .parse()
+                                   .findFirst(Image.class)
+                                   .get();
+        assertEquals("imageLabel", image.getLabel());
+        assertEquals("image.example.png", image.getLink());
+    }
+
+    @Test
+    public void testBuildAndParseEmphasis() throws Exception
+    {
+        assertEquals(true, this.buildAndParseFirstText(builder -> builder.addBoldText("boldText"))
+                               .isBold());
+        assertEquals(true, this.buildAndParseFirstText(builder -> builder.addItalicText("italicText"))
+                               .isItalic());
+    }
+
+    private Text buildAndParseFirstText(Consumer<MarkdownDocumentBuilder> builderConsumer)
+    {
+        return MarkdownUtils.builder()
+                            .applyTo(builderConsumer)
+                            .build()
+                            .parse()
+                            .findFirst(Text.class)
+                            .get();
+    }
+
+    @Test
+    public void testBuildAndParseCode() throws Exception
+    {
+        assertEquals("inlineCode()", MarkdownUtils.builder()
+                                                  .addCode("inlineCode()")
+                                                  .build()
+                                                  .parse()
+                                                  .findFirst(Code.class)
+                                                  .get()
+                                                  .getValue());
+    }
+
+    @Test
+    public void testBuildAndParseCodeBlock() throws Exception
+    {
+        CodeBlock codeBlock = MarkdownUtils.builder()
+                                           .addCodeBlock("int value = 1;", "java")
+                                           .build()
+                                           .parse()
+                                           .findFirst(CodeBlock.class)
+                                           .get();
+        assertEquals("int value = 1;\n", codeBlock.getValue());
+        assertEquals("java", codeBlock.getLanguage()
+                                      .get());
+    }
+
+    @Test
+    public void testBuildAndParseUnorderedList() throws Exception
+    {
+        assertEquals(Arrays.asList("firstItem", "secondItem"), this.buildAndParseListTexts(builder -> builder.addUnorderedList(Arrays.asList("firstItem",
+                                                                                                                                            "secondItem")),
+                                                                                          UnorderedList.class));
+    }
+
+    @Test
+    public void testBuildAndParseOrderedList() throws Exception
+    {
+        assertEquals(Arrays.asList("firstItem", "secondItem"), this.buildAndParseListTexts(builder -> builder.addOrderedList(Arrays.asList("firstItem",
+                                                                                                                                          "secondItem")),
+                                                                                          OrderedList.class));
+    }
+
+    private <L extends BasicList> List<String> buildAndParseListTexts(Consumer<MarkdownDocumentBuilder> builderConsumer, Class<L> listType)
+    {
+        return MarkdownUtils.builder()
+                            .applyTo(builderConsumer)
+                            .build()
+                            .parse(options -> options.enableWrapIntoParagraphs())
+                            .findFirst(listType)
+                            .get()
+                            .getElements()
+                            .stream()
+                            .map(element -> MarkdownUtilsTest.collectContent(Stream.of(element))
+                                                             .trim())
+                            .collect(Collectors.toList());
+    }
+
+    @Test
+    public void testBuildAndParseBlockQuote() throws Exception
+    {
+        // a block quote is not modelled as an own element yet, so its content arrives as regular text
+        assertTrue(MarkdownUtilsTest.collectContent(MarkdownUtils.builder()
+                                                                 .addBlockQuote(Arrays.asList("quotedText"))
+                                                                 .build()
+                                                                 .parse()
+                                                                 .get())
+                                    .contains("quotedText"));
+    }
+
+    @Test
+    public void testBuildAndParseThematicBreak() throws Exception
+    {
+        assertEquals(1, MarkdownUtils.builder()
+                                     .addText("before")
+                                     .addThematicBreak()
+                                     .addText("after")
+                                     .build()
+                                     .parse()
+                                     .getAndFilter(ThematicBreak.class)
+                                     .count());
+    }
+
+    @Test
+    public void testParseSourceLineOfLinkAndText() throws Exception
+    {
+        String markdown = "# Title\n" + "\n" + "First paragraph.\n" + "\n" + "Second paragraph with a [label](http://link.example).\n";
+        MarkdownParsedDocument parsedDocument = MarkdownUtils.parse(markdown, options -> options.enableWrapIntoParagraphs());
+
+        assertEquals(Optional.of(5), MarkdownUtilsTest.collectContentElements(parsedDocument.get())
+                                                      .stream()
+                                                      .map(Element::asLink)
+                                                      .filter(Optional::isPresent)
+                                                      .map(Optional::get)
+                                                      .findFirst()
+                                                      .get()
+                                                      .getSourceLine());
+        // heading, first paragraph, then the text before the link, the link label itself and the text after it - all three on line 5
+        assertEquals(Arrays.asList(1, 3, 5, 5, 5), MarkdownUtilsTest.collectContentElements(parsedDocument.get())
+                                                                 .stream()
+                                                                 .map(Element::asText)
+                                                                 .filter(Optional::isPresent)
+                                                                 .map(Optional::get)
+                                                                 .map(Text::getSourceLine)
+                                                                 .filter(Optional::isPresent)
+                                                                 .map(Optional::get)
+                                                                 .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testSourceLineSurvivesClearCustomTokens() throws Exception
+    {
+        Link link = MarkdownUtils.parse("\n\n[label{ID}](http://link.example)\n", options -> options.enableParseCustomIdTokens())
+                                 .clearCustomTokens()
+                                 .findFirst(Link.class)
+                                 .get();
+        assertEquals(Optional.of(3), link.getSourceLine());
+    }
+
+    /**
+     * Exercises {@link MarkdownParsedDocument#clearCustomTokens()} - and with it the {@link Element#cloneAndFilter(java.util.function.Predicate)} of every
+     * {@link Element} type - over a document holding all markdown constructs: no custom id token may survive the filtering and no content may get lost by it.
+     */
+    @Test
+    public void testClearCustomTokensOfAllMarkdownConstructs() throws Exception
+    {
+        String markdown = "# headingText{#headingId}\n" + "\n" + "Some paragraphText{paragraphId} with a [linkLabel{linkId}](http://link.example).\n" + "\n"
+                + "* firstItemText{itemId}\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "|columnTitleText{columnId}|\n" + "|---|\n"
+                + "|cellText{cellId}|\n";
+        List<String> markers = Arrays.asList("headingText", "paragraphText", "linkLabel", "firstItemText", "fencedCodeText", "columnTitleText", "cellText");
+
+        MarkdownParsedDocument parsedDocument = MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()
+                                                                                                .enableWrapIntoParagraphs());
+        assertEquals(Arrays.asList("#headingId", "paragraphId", "linkId", "itemId", "columnId", "cellId"),
+                     MarkdownUtilsTest.collectContentElements(parsedDocument.get())
+                                      .stream()
+                                      .map(Element::asCustomIdentifier)
+                                      .filter(Optional::isPresent)
+                                      .map(Optional::get)
+                                      .map(CustomIdentifier::getIdentifier)
+                                      .collect(Collectors.toList()));
+
+        List<Element> clearedElements = parsedDocument.clearCustomTokens()
+                                                      .get()
+                                                      .collect(Collectors.toList());
+        assertEquals(Arrays.asList(), MarkdownUtilsTest.collectContentElements(clearedElements.stream())
+                                                       .stream()
+                                                       .map(Element::asCustomIdentifier)
+                                                       .filter(Optional::isPresent)
+                                                       .map(Optional::get)
+                                                       .collect(Collectors.toList()));
+
+        String content = MarkdownUtilsTest.collectContent(clearedElements.stream());
+        markers.forEach(marker -> assertTrue("Content lost by clearCustomTokens: " + marker + " within <" + content + ">", content.contains(marker)));
+    }
+
+    /**
+     * Collects everything the public API of the given {@link Element}s exposes as content. Content that is not reachable this way is lost for any caller.
+     */
+    private static String collectContent(Stream<Element> elements)
+    {
+        return MarkdownUtilsTest.collectContentElements(elements)
+                                .stream()
+                                .map(MarkdownUtilsTest::determineContent)
+                                .collect(Collectors.joining("\n"));
+    }
+
+    private static String determineContent(Element element)
+    {
+        StringBuilder result = new StringBuilder();
+        element.asText()
+               .ifPresent(text -> result.append(text.getValue()));
+        element.asCode()
+               .ifPresent(code -> result.append(code.getValue()));
+        element.asCodeBlock()
+               .ifPresent(codeBlock -> result.append(codeBlock.getValue()));
+        element.asHtml()
+               .ifPresent(html -> result.append(html.getValue()));
+        element.asHtmlBlock()
+               .ifPresent(htmlBlock -> result.append(htmlBlock.getValue()));
+        element.asCustomIdentifier()
+               .ifPresent(customIdentifier -> result.append(customIdentifier.getIdentifier()));
+        element.asImage()
+               .ifPresent(image -> result.append(Optional.ofNullable(image.getLabel())
+                                                         .orElse(""))
+                                         .append(" ")
+                                         .append(image.getLink()));
+        element.asLink()
+               .ifPresent(link -> result.append(link.getLink()));
+        return result.toString();
+    }
+
+    private static List<Element> collectContentElements(Stream<Element> elements)
+    {
+        List<Element> result = new ArrayList<>();
+        elements.forEach(element -> MarkdownUtilsTest.collectContentElements(element, result));
+        return result;
+    }
+
+    private static void collectContentElements(Element element, List<Element> result)
+    {
+        result.add(element);
+        element.asLink()
+               .ifPresent(link -> link.getElements()
+                                      .forEach(child -> MarkdownUtilsTest.collectContentElements(child, result)));
+        element.asHeading()
+               .ifPresent(heading -> heading.getElements()
+                                            .forEach(child -> MarkdownUtilsTest.collectContentElements(child, result)));
+        element.asElementWithChildren()
+               .ifPresent(elementWithChildren -> elementWithChildren.getChildren()
+                                                                    .forEach(child -> MarkdownUtilsTest.collectContentElements(child, result)));
     }
 }
