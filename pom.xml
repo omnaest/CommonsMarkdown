@@ -50,6 +50,21 @@
 			<version>0.29.0</version>
 		</dependency>
 		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-gfm-strikethrough</artifactId>
+			<version>0.29.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-task-list-items</artifactId>
+			<version>0.29.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-autolink</artifactId>
+			<version>0.29.0</version>
+		</dependency>
+		<dependency>
 			<groupId>org.omnaest.utils</groupId>
 			<artifactId>CommonsLangAndIO</artifactId>
 			<version>0.0.1-SNAPSHOT</version>

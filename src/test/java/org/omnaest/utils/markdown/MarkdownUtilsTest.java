@@ -20,7 +20,9 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -42,6 +44,7 @@ import org.omnaest.utils.markdown.MarkdownUtils.Image;
 import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocumentBuilder;
 import org.omnaest.utils.markdown.MarkdownUtils.OrderedList;
 import org.omnaest.utils.markdown.MarkdownUtils.Table.Alignment;
+import org.omnaest.utils.markdown.MarkdownUtils.TaskListMarker;
 import org.omnaest.utils.markdown.MarkdownUtils.Table.Column;
 import org.omnaest.utils.markdown.MarkdownUtils.ThematicBreak;
 import org.omnaest.utils.markdown.MarkdownUtils.UnorderedList;
@@ -895,11 +898,12 @@ public class MarkdownUtilsTest
                 + "Some paragraphText with **boldText** and *italicText* and `inlineCodeText` and a [linkLabel](http://link.example) and an "
                 + "![imageAltText](image.example.png).\n" + "\n" + "> quotedText\n" + "\n" + "* firstItemText\n" + "* secondItemText\n" + "\n"
                 + "1. orderedItemText\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "    indentedCodeText\n" + "\n" + "***\n" + "\n"
-                + "<div>htmlBlockText</div>\n" + "\n" + "Text with <b>inlineHtmlText</b> tags.\n" + "\n" + "|columnTitleText|\n" + "|---|\n" + "|cellText|\n";
+                + "<div>htmlBlockText</div>\n" + "\n" + "Text with <b>inlineHtmlText</b> tags.\n" + "\n" + "Some ~~struckText~~ and www.autolink.example\n"
+                + "\n" + "- [ ] todoItemText\n" + "- [x] doneItemText\n" + "\n" + "|columnTitleText|\n" + "|---|\n" + "|cellText|\n";
         List<String> markers = Arrays.asList("headingText", "headingId", "paragraphText", "boldText", "italicText", "inlineCodeText", "linkLabel",
                                              "http://link.example", "imageAltText", "image.example.png", "quotedText", "firstItemText", "secondItemText",
-                                             "orderedItemText", "fencedCodeText", "indentedCodeText", "htmlBlockText", "inlineHtmlText", "columnTitleText",
-                                             "cellText");
+                                             "orderedItemText", "fencedCodeText", "indentedCodeText", "htmlBlockText", "inlineHtmlText", "struckText",
+                                             "www.autolink.example", "todoItemText", "doneItemText", "columnTitleText", "cellText");
 
         Arrays.asList(MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()),
                       MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()
@@ -909,6 +913,71 @@ public class MarkdownUtilsTest
                   String content = MarkdownUtilsTest.collectContent(parsedDocument.get());
                   markers.forEach(marker -> assertTrue("Content lost by the parser: " + marker + " within <" + content + ">", content.contains(marker)));
               });
+    }
+
+    @Test
+    public void testParseStrikethrough() throws Exception
+    {
+        assertEquals(Arrays.asList("plain:false", "struckText:true", "tail:false"), MarkdownUtils.parse("plain~~struckText~~tail")
+                                                                                                 .getAndFilter(Text.class)
+                                                                                                 .map(text -> text.getValue() + ":" + text.isStrikethrough())
+                                                                                                 .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testParseStrikethroughCombinedWithEmphasis() throws Exception
+    {
+        Text text = MarkdownUtils.parse("~~**struckAndBold**~~")
+                                 .findFirst(Text.class)
+                                 .get();
+        assertEquals(true, text.isStrikethrough());
+        assertEquals(true, text.isBold());
+    }
+
+    @Test
+    public void testParseTaskListItems() throws Exception
+    {
+        List<Element> elements = MarkdownUtilsTest.collectContentElements(MarkdownUtils.parse("- [ ] todoText\n- [x] doneText\n",
+                                                                                              options -> options.enableWrapIntoParagraphs())
+                                                                                       .get());
+        assertEquals(Arrays.asList(false, true), elements.stream()
+                                                         .map(Element::asTaskListMarker)
+                                                         .filter(Optional::isPresent)
+                                                         .map(Optional::get)
+                                                         .map(TaskListMarker::isChecked)
+                                                         .collect(Collectors.toList()));
+        // the marker is no longer part of the text of the item
+        assertEquals(Arrays.asList("todoText", "doneText"), elements.stream()
+                                                                    .map(Element::asText)
+                                                                    .filter(Optional::isPresent)
+                                                                    .map(Optional::get)
+                                                                    .map(Text::getValue)
+                                                                    .map(String::trim)
+                                                                    .filter(value -> !value.isEmpty())
+                                                                    .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testParseAutolinkOfBareUrl() throws Exception
+    {
+        Link link = MarkdownUtils.parse("Visit www.example.org for more")
+                                 .findFirst(Link.class)
+                                 .get();
+        assertEquals("http://www.example.org", link.getLink());
+        assertEquals("www.example.org", link.getLabel());
+    }
+
+    @Test
+    public void testParseAutolinkOfBareEmailAndFullUrl() throws Exception
+    {
+        assertEquals("https://example.org/path", MarkdownUtils.parse("See https://example.org/path here")
+                                                              .findFirst(Link.class)
+                                                              .get()
+                                                              .getLink());
+        assertEquals("mailto:join@example.org", MarkdownUtils.parse("Write to join@example.org please")
+                                                             .findFirst(Link.class)
+                                                             .get()
+                                                             .getLink());
     }
 
     @Test
@@ -1070,6 +1139,38 @@ public class MarkdownUtilsTest
                                                                  .parse()
                                                                  .get())
                                     .contains("quotedText"));
+    }
+
+    @Test
+    public void testBuildAndParseStrikethrough() throws Exception
+    {
+        Text text = MarkdownUtils.builder()
+                                 .addStrikethroughText("struckText")
+                                 .build()
+                                 .parse()
+                                 .findFirst(Text.class)
+                                 .get();
+        assertEquals("struckText", text.getValue());
+        assertEquals(true, text.isStrikethrough());
+    }
+
+    @Test
+    public void testBuildAndParseTaskList() throws Exception
+    {
+        Map<String, Boolean> textToChecked = new LinkedHashMap<>();
+        textToChecked.put("todoText", false);
+        textToChecked.put("doneText", true);
+        List<Element> elements = MarkdownUtilsTest.collectContentElements(MarkdownUtils.builder()
+                                                                                       .addTaskList(textToChecked)
+                                                                                       .build()
+                                                                                       .parse(options -> options.enableWrapIntoParagraphs())
+                                                                                       .get());
+        assertEquals(Arrays.asList(false, true), elements.stream()
+                                                         .map(Element::asTaskListMarker)
+                                                         .filter(Optional::isPresent)
+                                                         .map(Optional::get)
+                                                         .map(TaskListMarker::isChecked)
+                                                         .collect(Collectors.toList()));
     }
 
     @Test

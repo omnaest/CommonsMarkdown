@@ -41,7 +41,12 @@ import org.commonmark.ext.gfm.tables.TableBody;
 import org.commonmark.ext.gfm.tables.TableCell;
 import org.commonmark.ext.gfm.tables.TableHead;
 import org.commonmark.ext.gfm.tables.TableRow;
+import org.commonmark.ext.autolink.AutolinkExtension;
+import org.commonmark.ext.gfm.strikethrough.Strikethrough;
+import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
 import org.commonmark.ext.gfm.tables.TablesExtension;
+import org.commonmark.ext.task.list.items.TaskListItemMarker;
+import org.commonmark.ext.task.list.items.TaskListItemsExtension;
 import org.commonmark.node.AbstractVisitor;
 import org.commonmark.node.BulletList;
 import org.commonmark.node.CustomBlock;
@@ -247,6 +252,11 @@ public class MarkdownUtils
         public default Optional<ThematicBreak> asThematicBreak()
         {
             return as(ThematicBreak.class);
+        }
+
+        public default Optional<TaskListMarker> asTaskListMarker()
+        {
+            return as(TaskListMarker.class);
         }
 
         public default Optional<CustomIdentifier> asCustomIdentifier()
@@ -605,6 +615,7 @@ public class MarkdownUtils
         private String  value;
         private boolean bold;
         private boolean italic;
+        private boolean strikethrough;
         private Integer sourceLine;
 
         public Text(String value, boolean bold)
@@ -619,11 +630,29 @@ public class MarkdownUtils
 
         public Text(String value, boolean bold, boolean italic, Integer sourceLine)
         {
+            this(value, bold, italic, false, sourceLine);
+        }
+
+        public Text(String value, boolean bold, boolean italic, boolean strikethrough, Integer sourceLine)
+        {
             super();
             this.value = value;
             this.bold = bold;
             this.italic = italic;
+            this.strikethrough = strikethrough;
             this.sourceLine = sourceLine;
+        }
+
+        /**
+         * Returns true if this {@link Text} is wrapped into the double tilde markup like {@code ~~struck~~}, which is a github flavored markdown extension.
+         *
+         * @see #isBold()
+         * @see #isItalic()
+         * @return
+         */
+        public boolean isStrikethrough()
+        {
+            return this.strikethrough;
         }
 
         @Override
@@ -662,13 +691,13 @@ public class MarkdownUtils
         @Override
         public String toString()
         {
-            return "Text [value=" + this.value + ", bold=" + this.bold + ", italic=" + this.italic + "]";
+            return "Text [value=" + this.value + ", bold=" + this.bold + ", italic=" + this.italic + ", strikethrough=" + this.strikethrough + "]";
         }
 
         @Override
         public Optional<Text> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
-            return Optional.of(new Text(this.value, this.bold, this.italic, this.sourceLine))
+            return Optional.of(new Text(this.value, this.bold, this.italic, this.strikethrough, this.sourceLine))
                            .filter(inclusionFilter);
         }
 
@@ -754,6 +783,41 @@ public class MarkdownUtils
         public Optional<CodeBlock> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
             return Optional.of(new CodeBlock(this.value, this.language))
+                           .filter(inclusionFilter);
+        }
+    }
+
+    /**
+     * The checkbox of a task list item like <code>- [x] done</code>, which is a github flavored markdown extension. The marker is provided as the first
+     * {@link Element} of the item, the text of the item follows it.
+     *
+     * @author omnaest
+     */
+    public static class TaskListMarker implements Element
+    {
+        private final boolean checked;
+
+        public TaskListMarker(boolean checked)
+        {
+            super();
+            this.checked = checked;
+        }
+
+        public boolean isChecked()
+        {
+            return this.checked;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "TaskListMarker [checked=" + this.checked + "]";
+        }
+
+        @Override
+        public Optional<TaskListMarker> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new TaskListMarker(this.checked))
                            .filter(inclusionFilter);
         }
     }
@@ -1373,7 +1437,8 @@ public class MarkdownUtils
     private static MarkdownParsedDocument parse(String text, MarkdownParseOptions options)
     {
         //
-        List<Extension> extensions = Arrays.asList(TablesExtension.create());
+        List<Extension> extensions = Arrays.asList(TablesExtension.create(), StrikethroughExtension.create(), TaskListItemsExtension.create(),
+                                                   AutolinkExtension.create());
         Parser parser = Parser.builder()
                               .extensions(extensions)
                               .includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES)
@@ -1479,30 +1544,34 @@ public class MarkdownUtils
         private final Consumer<Element> elementConsumer;
         private final boolean           inheritedBold;
         private final boolean           inheritedItalic;
-        private boolean                 bold   = false;
-        private boolean                 italic = false;
+        private final boolean           inheritedStrikethrough;
+        private boolean                 bold          = false;
+        private boolean                 italic        = false;
+        private boolean                 strikethrough = false;
         private MarkdownParseOptions    options;
 
         private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options)
         {
-            this(elementConsumer, options, false, false);
+            this(elementConsumer, options, false, false, false);
         }
 
         /**
          * A nested {@link Element} like a {@link Heading} or {@link Link} is visited by an own {@link ElementConsumerDrivenVisitor}, so any surrounding emphasis
          * has to be handed over explicitly to not get lost on the way down.
          */
-        private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options, boolean inheritedBold, boolean inheritedItalic)
+        private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options, boolean inheritedBold, boolean inheritedItalic,
+                                            boolean inheritedStrikethrough)
         {
             this.elementConsumer = elementConsumer;
             this.options = options;
             this.inheritedBold = inheritedBold;
             this.inheritedItalic = inheritedItalic;
+            this.inheritedStrikethrough = inheritedStrikethrough;
         }
 
         private ElementConsumerDrivenVisitor newChildVisitor(Consumer<Element> elementConsumer)
         {
-            return new ElementConsumerDrivenVisitor(elementConsumer, this.options, this.isBold(), this.isItalic());
+            return new ElementConsumerDrivenVisitor(elementConsumer, this.options, this.isBold(), this.isItalic(), this.isStrikethrough());
         }
 
         private boolean isBold()
@@ -1513,6 +1582,11 @@ public class MarkdownUtils
         private boolean isItalic()
         {
             return this.italic || this.inheritedItalic;
+        }
+
+        private boolean isStrikethrough()
+        {
+            return this.strikethrough || this.inheritedStrikethrough;
         }
 
         /**
@@ -1613,7 +1687,7 @@ public class MarkdownUtils
                                                                                                                                              .forEach(group -> this.elementConsumer.accept(new CustomIdentifier(group))))
                                                                                               .apply(value)
                     : value;
-            this.elementConsumer.accept(new Text(nonInterpretableValue, this.isBold(), this.isItalic(), determineSourceLine(text)));
+            this.elementConsumer.accept(new Text(nonInterpretableValue, this.isBold(), this.isItalic(), this.isStrikethrough(), determineSourceLine(text)));
             super.visit(text);
         }
 
@@ -1734,6 +1808,19 @@ public class MarkdownUtils
                 this.parseChildrenElements(customNode)
                     .forEach(this.elementConsumer::accept);
             }
+            else if (customNode instanceof Strikethrough)
+            {
+                boolean previousStrikethrough = this.strikethrough;
+                this.strikethrough = true;
+
+                super.visit(customNode);
+
+                this.strikethrough = previousStrikethrough;
+            }
+            else if (customNode instanceof TaskListItemMarker)
+            {
+                this.elementConsumer.accept(new TaskListMarker(((TaskListItemMarker) customNode).isChecked()));
+            }
             else
             {
                 super.visit(customNode);
@@ -1796,6 +1883,22 @@ public class MarkdownUtils
          * @return
          */
         public MarkdownDocumentBuilder addItalicText(String text);
+
+        /**
+         * Adds struck through text, e.g. <code>~~text~~</code>, which is a github flavored markdown extension.
+         *
+         * @param text
+         * @return
+         */
+        public MarkdownDocumentBuilder addStrikethroughText(String text);
+
+        /**
+         * Adds a task list with one item per given text, e.g. <code>- [x] done</code>, which is a github flavored markdown extension.
+         *
+         * @param textToChecked
+         * @return
+         */
+        public MarkdownDocumentBuilder addTaskList(Map<String, Boolean> textToChecked);
 
         /**
          * Adds inline code, e.g. <code>`code`</code>.
@@ -1945,6 +2048,25 @@ public class MarkdownUtils
             public MarkdownDocumentBuilder addItalicText(String text)
             {
                 this.appendRawLine("*" + StringUtils.defaultString(text) + "*");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addStrikethroughText(String text)
+            {
+                this.appendRawLine("~~" + StringUtils.defaultString(text) + "~~");
+                return this;
+            }
+
+            @Override
+            public MarkdownDocumentBuilder addTaskList(Map<String, Boolean> textToChecked)
+            {
+                this.addRawLineBreak();
+                Optional.ofNullable(textToChecked)
+                        .orElse(Collections.emptyMap())
+                        .forEach((text, checked) -> this.appendRawLine("- [" + (Boolean.TRUE.equals(checked) ? "x" : " ") + "] "
+                                + StringUtils.defaultString(text)));
+                this.addRawLineBreak();
                 return this;
             }
 
