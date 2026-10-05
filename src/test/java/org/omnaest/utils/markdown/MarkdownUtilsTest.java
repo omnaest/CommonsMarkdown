@@ -24,36 +24,39 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.junit.Ignore;
 import org.junit.Test;
 import org.omnaest.utils.StringUtils;
-import java.util.function.Consumer;
-
 import org.omnaest.utils.markdown.MarkdownUtils.BasicList;
+import org.omnaest.utils.markdown.MarkdownUtils.BlockQuote;
 import org.omnaest.utils.markdown.MarkdownUtils.Code;
 import org.omnaest.utils.markdown.MarkdownUtils.CodeBlock;
 import org.omnaest.utils.markdown.MarkdownUtils.CustomIdentifier;
 import org.omnaest.utils.markdown.MarkdownUtils.Element;
+import org.omnaest.utils.markdown.MarkdownUtils.ElementWithChildren;
 import org.omnaest.utils.markdown.MarkdownUtils.Heading;
 import org.omnaest.utils.markdown.MarkdownUtils.Html;
 import org.omnaest.utils.markdown.MarkdownUtils.HtmlBlock;
 import org.omnaest.utils.markdown.MarkdownUtils.Image;
-import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocumentBuilder;
-import org.omnaest.utils.markdown.MarkdownUtils.OrderedList;
-import org.omnaest.utils.markdown.MarkdownUtils.Table.Alignment;
-import org.omnaest.utils.markdown.MarkdownUtils.TaskListMarker;
-import org.omnaest.utils.markdown.MarkdownUtils.Table.Column;
-import org.omnaest.utils.markdown.MarkdownUtils.ThematicBreak;
-import org.omnaest.utils.markdown.MarkdownUtils.UnorderedList;
 import org.omnaest.utils.markdown.MarkdownUtils.LineBreak;
 import org.omnaest.utils.markdown.MarkdownUtils.Link;
+import org.omnaest.utils.markdown.MarkdownUtils.ListItem;
 import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocument;
+import org.omnaest.utils.markdown.MarkdownUtils.MarkdownDocumentBuilder;
 import org.omnaest.utils.markdown.MarkdownUtils.MarkdownParsedDocument;
+import org.omnaest.utils.markdown.MarkdownUtils.OrderedList;
 import org.omnaest.utils.markdown.MarkdownUtils.Paragraph;
+import org.omnaest.utils.markdown.MarkdownUtils.Table.Alignment;
+import org.omnaest.utils.markdown.MarkdownUtils.Table.Column;
+import org.omnaest.utils.markdown.MarkdownUtils.TaskListMarker;
 import org.omnaest.utils.markdown.MarkdownUtils.Text;
+import org.omnaest.utils.markdown.MarkdownUtils.ThematicBreak;
+import org.omnaest.utils.markdown.MarkdownUtils.UnorderedList;
 import org.omnaest.utils.table.Table;
 
 /**
@@ -878,7 +881,7 @@ public class MarkdownUtilsTest
     private List<String> parseCustomIds(String markdown)
     {
         return MarkdownUtilsTest.collectContentElements(MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens())
-                                                                    .get())
+                                                                     .get())
                                 .stream()
                                 .map(Element::asCustomIdentifier)
                                 .filter(Optional::isPresent)
@@ -895,11 +898,11 @@ public class MarkdownUtilsTest
     public void testParseKeepsContentOfAllMarkdownConstructs() throws Exception
     {
         String markdown = "# headingText{#headingId}\n" + "\n"
-                + "Some paragraphText with **boldText** and *italicText* and `inlineCodeText` and a [linkLabel](http://link.example) and an "
-                + "![imageAltText](image.example.png).\n" + "\n" + "> quotedText\n" + "\n" + "* firstItemText\n" + "* secondItemText\n" + "\n"
-                + "1. orderedItemText\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "    indentedCodeText\n" + "\n" + "***\n" + "\n"
-                + "<div>htmlBlockText</div>\n" + "\n" + "Text with <b>inlineHtmlText</b> tags.\n" + "\n" + "Some ~~struckText~~ and www.autolink.example\n"
-                + "\n" + "- [ ] todoItemText\n" + "- [x] doneItemText\n" + "\n" + "|columnTitleText|\n" + "|---|\n" + "|cellText|\n";
+                          + "Some paragraphText with **boldText** and *italicText* and `inlineCodeText` and a [linkLabel](http://link.example) and an "
+                          + "![imageAltText](image.example.png).\n" + "\n" + "> quotedText\n" + "\n" + "* firstItemText\n" + "* secondItemText\n" + "\n"
+                          + "1. orderedItemText\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "    indentedCodeText\n" + "\n" + "***\n" + "\n"
+                          + "<div>htmlBlockText</div>\n" + "\n" + "Text with <b>inlineHtmlText</b> tags.\n" + "\n" + "Some ~~struckText~~ and www.autolink.example\n"
+                          + "\n" + "- [ ] todoItemText\n" + "- [x] doneItemText\n" + "\n" + "|columnTitleText|\n" + "|---|\n" + "|cellText|\n";
         List<String> markers = Arrays.asList("headingText", "headingId", "paragraphText", "boldText", "italicText", "inlineCodeText", "linkLabel",
                                              "http://link.example", "imageAltText", "image.example.png", "quotedText", "firstItemText", "secondItemText",
                                              "orderedItemText", "fencedCodeText", "indentedCodeText", "htmlBlockText", "inlineHtmlText", "struckText",
@@ -984,9 +987,9 @@ public class MarkdownUtilsTest
     public void testParseHtmlBlockAndInlineHtml() throws Exception
     {
         assertEquals("<div class=\"x\">\n<p>htmlBlockText</p>\n</div>", MarkdownUtils.parse("<div class=\"x\">\n<p>htmlBlockText</p>\n</div>\n")
-                                                                                       .findFirst(HtmlBlock.class)
-                                                                                       .get()
-                                                                                       .getValue());
+                                                                                     .findFirst(HtmlBlock.class)
+                                                                                     .get()
+                                                                                     .getValue());
         assertEquals(Arrays.asList("<b>", "</b>"), MarkdownUtils.parse("text with <b>bold</b> tag")
                                                                 .getAndFilter(Html.class)
                                                                 .map(Html::getValue)
@@ -1102,16 +1105,16 @@ public class MarkdownUtilsTest
     public void testBuildAndParseUnorderedList() throws Exception
     {
         assertEquals(Arrays.asList("firstItem", "secondItem"), this.buildAndParseListTexts(builder -> builder.addUnorderedList(Arrays.asList("firstItem",
-                                                                                                                                            "secondItem")),
-                                                                                          UnorderedList.class));
+                                                                                                                                             "secondItem")),
+                                                                                           UnorderedList.class));
     }
 
     @Test
     public void testBuildAndParseOrderedList() throws Exception
     {
         assertEquals(Arrays.asList("firstItem", "secondItem"), this.buildAndParseListTexts(builder -> builder.addOrderedList(Arrays.asList("firstItem",
-                                                                                                                                          "secondItem")),
-                                                                                          OrderedList.class));
+                                                                                                                                           "secondItem")),
+                                                                                           OrderedList.class));
     }
 
     private <L extends BasicList> List<String> buildAndParseListTexts(Consumer<MarkdownDocumentBuilder> builderConsumer, Class<L> listType)
@@ -1202,14 +1205,14 @@ public class MarkdownUtilsTest
                                                       .getSourceLine());
         // heading, first paragraph, then the text before the link, the link label itself and the text after it - all three on line 5
         assertEquals(Arrays.asList(1, 3, 5, 5, 5), MarkdownUtilsTest.collectContentElements(parsedDocument.get())
-                                                                 .stream()
-                                                                 .map(Element::asText)
-                                                                 .filter(Optional::isPresent)
-                                                                 .map(Optional::get)
-                                                                 .map(Text::getSourceLine)
-                                                                 .filter(Optional::isPresent)
-                                                                 .map(Optional::get)
-                                                                 .collect(Collectors.toList()));
+                                                                    .stream()
+                                                                    .map(Element::asText)
+                                                                    .filter(Optional::isPresent)
+                                                                    .map(Optional::get)
+                                                                    .map(Text::getSourceLine)
+                                                                    .filter(Optional::isPresent)
+                                                                    .map(Optional::get)
+                                                                    .collect(Collectors.toList()));
     }
 
     @Test
@@ -1230,8 +1233,8 @@ public class MarkdownUtilsTest
     public void testClearCustomTokensOfAllMarkdownConstructs() throws Exception
     {
         String markdown = "# headingText{#headingId}\n" + "\n" + "Some paragraphText{paragraphId} with a [linkLabel{linkId}](http://link.example).\n" + "\n"
-                + "* firstItemText{itemId}\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "|columnTitleText{columnId}|\n" + "|---|\n"
-                + "|cellText{cellId}|\n";
+                          + "* firstItemText{itemId}\n" + "\n" + "```java\n" + "fencedCodeText\n" + "```\n" + "\n" + "|columnTitleText{columnId}|\n" + "|---|\n"
+                          + "|cellText{cellId}|\n";
         List<String> markers = Arrays.asList("headingText", "paragraphText", "linkLabel", "firstItemText", "fencedCodeText", "columnTitleText", "cellText");
 
         MarkdownParsedDocument parsedDocument = MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()
@@ -1257,6 +1260,361 @@ public class MarkdownUtilsTest
 
         String content = MarkdownUtilsTest.collectContent(clearedElements.stream());
         markers.forEach(marker -> assertTrue("Content lost by clearCustomTokens: " + marker + " within <" + content + ">", content.contains(marker)));
+    }
+
+    /**
+     * A document holding a block quote (with a list inside), a loose list, a nested list and a task list, each separated by a plain paragraph so that the
+     * constructs do not merge into each other.
+     */
+    private static final String STRUCTURE_FIXTURE = "> quoted **bold** [link](http://q.example)\n" + ">\n" + "> - inQuote\n" + "\n" + "separator one\n" + "\n"
+                                                    + "- loose one\n" + "\n" + "  loose one second\n" + "- loose two\n" + "\n" + "separator two\n" + "\n" + "1. outer\n" + "   - nested a\n"
+                                                    + "   - nested b\n" + "2. outer two\n" + "\n" + "separator three\n" + "\n" + "- [ ] todo\n" + "- [x] done\n";
+
+    /**
+     * Pins the element tree produced WITHOUT the structural options. The block quote and list item elements are opt-in precisely because several consumers
+     * dispatch over the element kinds and would silently drop wrapped content, so the default tree must stay exactly as it was.
+     */
+    @Test
+    public void testDefaultTreeStaysFlatWithoutStructuralOptions() throws Exception
+    {
+        assertEquals("Text(quoted )\n" + "Text(bold|bold)\n" + "Text( )\n" + "Link(http://q.example)[Text(link)]\n" + "UnorderedList(tight=true)[Text(inQuote)]\n"
+                     + "Text(separator one)\n" + "UnorderedList(tight=false)[Text(loose one)|Text(loose one second)|Text(loose two)]\n" + "Text(separator two)\n"
+                     + "OrderedList(start=1,tight=true)[Text(outer)|UnorderedList(tight=true)[Text(nested a)|Text(nested b)]|Text(outer two)]\n"
+                     + "Text(separator three)\n" + "UnorderedList(tight=true)[TaskListMarker(false)|Text(todo)|TaskListMarker(true)|Text(done)]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse(STRUCTURE_FIXTURE)
+                                                            .get()));
+    }
+
+    @Test
+    public void testDefaultTreeStaysFlatWithoutStructuralOptionsWhenWrappingIntoParagraphs() throws Exception
+    {
+        assertEquals("Paragraph[Text(quoted )|Text(bold|bold)|Text( )|Link(http://q.example)[Text(link)]]\n"
+                     + "UnorderedList(tight=true)[Paragraph[Text(inQuote)]]\n" + "Paragraph[Text(separator one)]\n"
+                     + "UnorderedList(tight=false)[Paragraph[Text(loose one)]|Paragraph[Text(loose one second)]|Paragraph[Text(loose two)]]\n"
+                     + "Paragraph[Text(separator two)]\n"
+                     + "OrderedList(start=1,tight=true)[Paragraph[Text(outer)]|UnorderedList(tight=true)[Paragraph[Text(nested a)]|Paragraph[Text(nested b)]]|Paragraph[Text(outer two)]]\n"
+                     + "Paragraph[Text(separator three)]\n"
+                     + "UnorderedList(tight=true)[TaskListMarker(false)|Paragraph[Text(todo)]|TaskListMarker(true)|Paragraph[Text(done)]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse(STRUCTURE_FIXTURE, options -> options.enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testExplicitlyDisabledStructuralOptionsEqualTheDefault() throws Exception
+    {
+        assertEquals(MarkdownUtilsTest.project(MarkdownUtils.parse(STRUCTURE_FIXTURE, options -> options.enableWrapIntoParagraphs())
+                                                            .get()),
+                     MarkdownUtilsTest.project(MarkdownUtils.parse(STRUCTURE_FIXTURE, options -> options.enableWrapIntoParagraphs()
+                                                                                                        .enableBlockQuotes(false)
+                                                                                                        .enableListItems(false))
+                                                            .get()));
+    }
+
+    @Test
+    public void testStructuralOptionsDefaultToOffAndCanBeToggled() throws Exception
+    {
+        MarkdownUtils.MarkdownParseOptions options = new MarkdownUtils.MarkdownParseOptions();
+        assertEquals(false, options.isBlockQuotes());
+        assertEquals(false, options.isListItems());
+        assertEquals(true, options.enableBlockQuotes()
+                                  .isBlockQuotes());
+        assertEquals(true, options.enableListItems()
+                                  .isListItems());
+        assertEquals(false, options.enableBlockQuotes(false)
+                                   .isBlockQuotes());
+        assertEquals(false, options.enableListItems(false)
+                                   .isListItems());
+    }
+
+    @Test
+    public void testParseBlockQuoteHoldsItsBlocksAndKeepsInlineFormatting() throws Exception
+    {
+        assertEquals("BlockQuote[Paragraph[Text(a )|Text(b|bold)|Text( )|Link(u)[Text(c)]]|UnorderedList(tight=true)[Paragraph[Text(d)]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> a **b** [c](u)\n>\n> - d", options -> options.enableBlockQuotes()
+                                                                                                                   .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseBlockQuoteWithoutWrappingIntoParagraphsHoldsFlatContent() throws Exception
+    {
+        assertEquals("BlockQuote[Text(a )|Text(b|bold)|UnorderedList(tight=true)[Text(d)]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> a **b**\n>\n> - d", options -> options.enableBlockQuotes())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseNestedBlockQuote() throws Exception
+    {
+        assertEquals("BlockQuote[Paragraph[Text(x)]|BlockQuote[Paragraph[Text(y)]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> x\n>> y", options -> options.enableBlockQuotes()
+                                                                                                  .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseTwoSeparatedBlockQuotesAsTwoElements() throws Exception
+    {
+        assertEquals("BlockQuote[Paragraph[Text(a)]]\nBlockQuote[Paragraph[Text(b)]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> a\n\n> b", options -> options.enableBlockQuotes()
+                                                                                                   .enableWrapIntoParagraphs())
+                                                            .get()));
+        assertEquals("BlockQuote[Paragraph[Text(a)]]\nParagraph[Text(between)]\nBlockQuote[Paragraph[Text(b)]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> a\n\nbetween\n\n> b", options -> options.enableBlockQuotes()
+                                                                                                              .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseBlockQuoteKeepsEmphasisFlagsOfItsContent() throws Exception
+    {
+        assertEquals("BlockQuote[Paragraph[Text(bold|bold)|Text( )|Text(both|bold|italic)|Text( )|Text(struck|strikethrough)]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> **bold** ***both*** ~~struck~~", options -> options.enableBlockQuotes()
+                                                                                                                         .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+    @Test
+    public void testBuildAndParseBlockQuoteAsBlockQuoteElement() throws Exception
+    {
+        List<BlockQuote> blockQuotes = MarkdownUtils.builder()
+                                                    .addBlockQuote(Arrays.asList("quotedText"))
+                                                    .build()
+                                                    .parse(options -> options.enableBlockQuotes()
+                                                                             .enableWrapIntoParagraphs())
+                                                    .getAndFilter(BlockQuote.class)
+                                                    .collect(Collectors.toList());
+        assertEquals(1, blockQuotes.size());
+        assertEquals("BlockQuote[Paragraph[Text(quotedText)]]", MarkdownUtilsTest.project(blockQuotes.get(0)));
+    }
+
+    @Test
+    public void testParseLooseListItemsHoldAllTheirBlocksAndKeepTightness() throws Exception
+    {
+        UnorderedList list = MarkdownUtils.parse("- a\n\n  b\n- c", options -> options.enableListItems()
+                                                                                      .enableWrapIntoParagraphs())
+                                          .findFirst(UnorderedList.class)
+                                          .get();
+        assertEquals(Arrays.asList("ListItem", "ListItem"), MarkdownUtilsTest.kinds(list.getElements()));
+        assertEquals(false, list.isTight());
+        assertEquals(Arrays.asList("Paragraph", "Paragraph"), MarkdownUtilsTest.kinds(list.getElements()
+                                                                                          .get(0)
+                                                                                          .asListItem()
+                                                                                          .get()
+                                                                                          .getElements()));
+        assertEquals("UnorderedList(tight=false)[ListItem[Paragraph[Text(a)]|Paragraph[Text(b)]]|ListItem[Paragraph[Text(c)]]]",
+                     MarkdownUtilsTest.project(list));
+    }
+
+    @Test
+    public void testParseListItemKeepsCodeBlockHeadingImageAndTableAsChildren() throws Exception
+    {
+        String markdown = "- item\n" + "  ```java\n" + "  code\n" + "  ```\n" + "  # heading\n" + "\n" + "  ![alt](img.png)\n" + "\n" + "  | h |\n"
+                          + "  |---|\n" + "  | c |\n" + "- second\n";
+        UnorderedList list = MarkdownUtils.parse(markdown, options -> options.enableListItems()
+                                                                             .enableWrapIntoParagraphs())
+                                          .findFirst(UnorderedList.class)
+                                          .get();
+        assertEquals(Arrays.asList("ListItem", "ListItem"), MarkdownUtilsTest.kinds(list.getElements()));
+        List<Element> children = list.getElements()
+                                     .get(0)
+                                     .asListItem()
+                                     .get()
+                                     .getElements();
+        assertEquals(Arrays.asList("Paragraph", "CodeBlock", "Heading", "Paragraph", "Table"), MarkdownUtilsTest.kinds(children));
+        assertEquals("code\n", children.get(1)
+                                       .asCodeBlock()
+                                       .get()
+                                       .getValue());
+        assertEquals("img.png", children.get(3)
+                                        .asElementWithChildren()
+                                        .get()
+                                        .getChildren()
+                                        .get(0)
+                                        .asImage()
+                                        .get()
+                                        .getLink());
+        assertEquals("c", children.get(4)
+                                  .asTable()
+                                  .get()
+                                  .getRows()
+                                  .get(0)
+                                  .getCells()
+                                  .get(0)
+                                  .toText());
+    }
+
+    @Test
+    public void testParseNestedListSitsInsideItsItem() throws Exception
+    {
+        assertEquals("UnorderedList(tight=true)[ListItem[Paragraph[Text(a)]|UnorderedList(tight=true)[ListItem[Paragraph[Text(b)]]]]|ListItem[Paragraph[Text(c)]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("- a\n  - b\n- c", options -> options.enableListItems()
+                                                                                                        .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseTaskListMarkerSitsInsideItsItem() throws Exception
+    {
+        assertEquals("UnorderedList(tight=true)[ListItem[TaskListMarker(false)|Paragraph[Text(todo)]]|ListItem[TaskListMarker(true)|Paragraph[Text(done)]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("- [ ] todo\n- [x] done", options -> options.enableListItems()
+                                                                                                               .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseOrderedListItemsKeepStartNumber() throws Exception
+    {
+        assertEquals("OrderedList(start=5,tight=true)[ListItem[Paragraph[Text(a)]]|ListItem[Paragraph[Text(b)]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("5. a\n6. b", options -> options.enableListItems()
+                                                                                                   .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseListItemsWithoutWrappingIntoParagraphsHoldFlatContent() throws Exception
+    {
+        assertEquals("UnorderedList(tight=false)[ListItem[Text(a)|Text(b)]|ListItem[Text(c)]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("- a\n\n  b\n- c", options -> options.enableListItems())
+                                                            .get()));
+    }
+
+    @Test
+    public void testParseListItemKeepsEmphasisFlagsOfItsContent() throws Exception
+    {
+        assertEquals("UnorderedList(tight=true)[ListItem[Paragraph[Text(bold|bold)|Text( )|Text(both|bold|italic)]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("- **bold** ***both***", options -> options.enableListItems()
+                                                                                                              .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    /**
+     * Every structural option changes the outcome on its own, and only its own part of it.
+     */
+    @Test
+    public void testStructuralOptionsAreIndependentOfEachOther() throws Exception
+    {
+        String blockQuotesOnly = MarkdownUtilsTest.project(MarkdownUtils.parse(STRUCTURE_FIXTURE, options -> options.enableBlockQuotes()
+                                                                                                                    .enableWrapIntoParagraphs())
+                                                                        .get());
+        String listItemsOnly = MarkdownUtilsTest.project(MarkdownUtils.parse(STRUCTURE_FIXTURE, options -> options.enableListItems()
+                                                                                                                  .enableWrapIntoParagraphs())
+                                                                      .get());
+        assertTrue(blockQuotesOnly, blockQuotesOnly.contains("BlockQuote["));
+        assertTrue(blockQuotesOnly, !blockQuotesOnly.contains("ListItem["));
+        assertTrue(listItemsOnly, listItemsOnly.contains("ListItem["));
+        assertTrue(listItemsOnly, !listItemsOnly.contains("BlockQuote["));
+        // a list within a quote is itemized only if the item option is set as well
+        assertTrue(blockQuotesOnly,
+                   blockQuotesOnly.contains("BlockQuote[Paragraph[Text(quoted )|Text(bold|bold)|Text( )|Link(http://q.example)[Text(link)]]|UnorderedList(tight=true)[Paragraph[Text(inQuote)]]]"));
+        assertTrue(listItemsOnly, listItemsOnly.contains("UnorderedList(tight=true)[ListItem[Paragraph[Text(inQuote)]]]"));
+    }
+
+    @Test
+    public void testBothStructuralOptionsNestQuotesAndItemsInEachOther() throws Exception
+    {
+        assertEquals("BlockQuote[UnorderedList(tight=true)[ListItem[Paragraph[Text(a)]|BlockQuote[Paragraph[Text(b)]]]]]",
+                     MarkdownUtilsTest.project(MarkdownUtils.parse("> - a\n>   > b", options -> options.enableBlockQuotes()
+                                                                                                       .enableListItems()
+                                                                                                       .enableWrapIntoParagraphs())
+                                                            .get()));
+    }
+
+    @Test
+    public void testCloneAndFilterRecursesIntoBlockQuoteAndListItem() throws Exception
+    {
+        Element tree = new BlockQuote(Arrays.asList(new Text("keepQuoted", false), new Text("dropQuoted", false),
+                                                    new UnorderedList(Arrays.asList(new ListItem(Arrays.asList(new Text("keepItem", false),
+                                                                                                               new Text("dropItem", false)))))));
+        Element filtered = tree.cloneAndFilter(element -> !element.asText()
+                                                                  .map(text -> text.getValue()
+                                                                                   .startsWith("drop"))
+                                                                  .orElse(false))
+                               .get();
+        assertEquals("BlockQuote[Text(keepQuoted)|UnorderedList(tight=true)[ListItem[Text(keepItem)]]]", MarkdownUtilsTest.project(filtered));
+        // the clone is a new tree and the original stays untouched
+        assertEquals("BlockQuote[Text(keepQuoted)|Text(dropQuoted)|UnorderedList(tight=true)[ListItem[Text(keepItem)|Text(dropItem)]]]",
+                     MarkdownUtilsTest.project(tree));
+        assertTrue(filtered.asBlockQuote()
+                           .isPresent());
+        assertTrue(!tree.asListItem()
+                        .isPresent());
+    }
+
+    @Test
+    public void testCloneAndFilterDropsBlockQuoteAndListItemIfTheFilterRejectsThem() throws Exception
+    {
+        assertTrue(!new BlockQuote(Arrays.asList(new Text("a", false))).cloneAndFilter(element -> !element.asBlockQuote()
+                                                                                                          .isPresent())
+                                                                       .isPresent());
+        assertTrue(!new ListItem(Arrays.asList(new Text("a", false))).cloneAndFilter(element -> !element.asListItem()
+                                                                                                        .isPresent())
+                                                                     .isPresent());
+    }
+
+    @Test
+    public void testClearCustomTokensAndProcessorReachContentInsideBlockQuoteAndListItem() throws Exception
+    {
+        String markdown = "> quoteText{quoteId}\n" + "\n" + "- itemText{itemId}\n" + "\n" + "  itemSecondText{itemSecondId}\n";
+        MarkdownParsedDocument parsedDocument = MarkdownUtils.parse(markdown, options -> options.enableParseCustomIdTokens()
+                                                                                                .enableWrapIntoParagraphs()
+                                                                                                .enableBlockQuotes()
+                                                                                                .enableListItems());
+        List<Element> before = MarkdownUtilsTest.collectContentElements(parsedDocument.get());
+        assertEquals(1, before.stream()
+                              .filter(element -> element.asBlockQuote()
+                                                        .isPresent())
+                              .count());
+        assertEquals(1, before.stream()
+                              .filter(element -> element.asListItem()
+                                                        .isPresent())
+                              .count());
+        assertEquals(Arrays.asList("quoteId", "itemId", "itemSecondId"), MarkdownUtilsTest.identifiersOf(before));
+
+        List<Element> cleared = MarkdownUtilsTest.collectContentElements(parsedDocument.clearCustomTokens()
+                                                                                       .get());
+        assertEquals(Arrays.asList(), MarkdownUtilsTest.identifiersOf(cleared));
+        assertEquals(1, cleared.stream()
+                               .filter(element -> element.asBlockQuote()
+                                                         .isPresent())
+                               .count());
+        assertEquals(1, cleared.stream()
+                               .filter(element -> element.asListItem()
+                                                         .isPresent())
+                               .count());
+        String content = MarkdownUtilsTest.collectContent(parsedDocument.clearCustomTokens()
+                                                                        .get());
+        assertTrue(content, content.contains("quoteText") && content.contains("itemText") && content.contains("itemSecondText"));
+
+        // the processor walks into both
+        List<String> processedTexts = new ArrayList<>();
+        AtomicInteger processedBlockQuotes = new AtomicInteger();
+        AtomicInteger processedListItems = new AtomicInteger();
+        parsedDocument.newProcessor()
+                      .addVisitor(Text.class, text -> processedTexts.add(text.getValue()))
+                      .addVisitor(BlockQuote.class, blockQuote -> processedBlockQuotes.incrementAndGet())
+                      .addVisitor(ListItem.class, listItem -> processedListItems.incrementAndGet())
+                      .process();
+        assertEquals(Arrays.asList("quoteText", "itemText", "itemSecondText"), processedTexts);
+        assertEquals(1, processedBlockQuotes.get());
+        assertEquals(1, processedListItems.get());
+    }
+
+    private static List<String> identifiersOf(List<Element> elements)
+    {
+        return elements.stream()
+                       .map(Element::asCustomIdentifier)
+                       .filter(Optional::isPresent)
+                       .map(Optional::get)
+                       .map(CustomIdentifier::getIdentifier)
+                       .collect(Collectors.toList());
+    }
+
+    private static List<String> kinds(List<Element> elements)
+    {
+        return elements.stream()
+                       .map(element -> element.getClass()
+                                              .getSimpleName())
+                       .collect(Collectors.toList());
     }
 
     /**
@@ -1293,6 +1651,76 @@ public class MarkdownUtilsTest
         element.asLink()
                .ifPresent(link -> result.append(link.getLink()));
         return result.toString();
+    }
+
+    /**
+     * Projects the given {@link Element}s into a compact string of kinds, flags and children - one line per top level element.
+     */
+    private static String project(Stream<Element> elements)
+    {
+        return elements.map(MarkdownUtilsTest::project)
+                       .collect(Collectors.joining("\n"));
+    }
+
+    private static String project(Element element)
+    {
+        if (element instanceof Text)
+        {
+            Text text = (Text) element;
+            return "Text(" + text.getValue() + (text.isBold() ? "|bold" : "") + (text.isItalic() ? "|italic" : "")
+                   + (text.isStrikethrough() ? "|strikethrough" : "") + ")";
+        }
+        else if (element instanceof Link)
+        {
+            Link link = (Link) element;
+            return "Link(" + link.getLink() + ")" + MarkdownUtilsTest.projectChildren(link.getElements(), ",");
+        }
+        else if (element instanceof Heading)
+        {
+            Heading heading = (Heading) element;
+            return "Heading(" + heading.getStrength() + ")" + MarkdownUtilsTest.projectChildren(heading.getElements(), "|");
+        }
+        else if (element instanceof OrderedList)
+        {
+            OrderedList list = (OrderedList) element;
+            return "OrderedList(start=" + list.getStartNumber() + ",tight=" + list.isTight() + ")" + MarkdownUtilsTest.projectChildren(list.getChildren(), "|");
+        }
+        else if (element instanceof BasicList)
+        {
+            BasicList list = (BasicList) element;
+            return list.getClass()
+                       .getSimpleName()
+                   + "(tight=" + list.isTight() + ")" + MarkdownUtilsTest.projectChildren(list.getChildren(), "|");
+        }
+        else if (element instanceof TaskListMarker)
+        {
+            return "TaskListMarker(" + ((TaskListMarker) element).isChecked() + ")";
+        }
+        else if (element instanceof CodeBlock)
+        {
+            CodeBlock codeBlock = (CodeBlock) element;
+            return "CodeBlock(" + codeBlock.getValue() + "|" + codeBlock.getLanguage()
+                                                                        .orElse("")
+                   + ")";
+        }
+        else if (element instanceof ElementWithChildren)
+        {
+            return element.getClass()
+                          .getSimpleName()
+                   + MarkdownUtilsTest.projectChildren(((ElementWithChildren) element).getChildren(), "|");
+        }
+        else
+        {
+            return element.toString();
+        }
+    }
+
+    private static String projectChildren(List<Element> children, String separator)
+    {
+        return "[" + children.stream()
+                             .map(MarkdownUtilsTest::project)
+                             .collect(Collectors.joining(separator))
+               + "]";
     }
 
     private static List<Element> collectContentElements(Stream<Element> elements)

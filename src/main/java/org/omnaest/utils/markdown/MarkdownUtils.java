@@ -36,14 +36,14 @@ import java.util.stream.Stream;
 
 import org.apache.commons.lang3.StringUtils;
 import org.commonmark.Extension;
+import org.commonmark.ext.autolink.AutolinkExtension;
+import org.commonmark.ext.gfm.strikethrough.Strikethrough;
+import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
 import org.commonmark.ext.gfm.tables.TableBlock;
 import org.commonmark.ext.gfm.tables.TableBody;
 import org.commonmark.ext.gfm.tables.TableCell;
 import org.commonmark.ext.gfm.tables.TableHead;
 import org.commonmark.ext.gfm.tables.TableRow;
-import org.commonmark.ext.autolink.AutolinkExtension;
-import org.commonmark.ext.gfm.strikethrough.Strikethrough;
-import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
 import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.ext.task.list.items.TaskListItemMarker;
 import org.commonmark.ext.task.list.items.TaskListItemsExtension;
@@ -151,7 +151,7 @@ public class MarkdownUtils
         public MarkdownParsedDocument clearCustomTokens()
         {
             return new MarkdownParsedDocumentImpl(cloneAndFilterElements(this.elements, element -> !element.asCustomIdentifier()
-                                                                                                          .isPresent()));
+                                                                                                           .isPresent()));
         }
     }
 
@@ -304,6 +304,16 @@ public class MarkdownUtils
             return as(Table.class);
         }
 
+        public default Optional<BlockQuote> asBlockQuote()
+        {
+            return as(BlockQuote.class);
+        }
+
+        public default Optional<ListItem> asListItem()
+        {
+            return as(ListItem.class);
+        }
+
         @SuppressWarnings("unchecked")
         public default <T extends Element> Optional<T> as(Class<T> type)
         {
@@ -416,7 +426,7 @@ public class MarkdownUtils
             public Optional<Cell> cloneAndFilter(Predicate<Element> inclusionFilter)
             {
                 return Optional.of(new Cell(cloneAndFilterElements(this.getElements(), inclusionFilter), this.getAlignment()
-                                                                                                            .orElse(null)))
+                                                                                                             .orElse(null)))
                                .filter(inclusionFilter);
             }
         }
@@ -560,7 +570,7 @@ public class MarkdownUtils
         public Optional<Table> cloneAndFilter(Predicate<Element> inclusionFilter)
         {
             return Optional.of(new Table(cloneAndFilterElements(this.rows, inclusionFilter),
-                                                 cloneAndFilterElements(this.columns, inclusionFilter)))
+                                         cloneAndFilterElements(this.columns, inclusionFilter)))
                            .filter(inclusionFilter);
         }
 
@@ -991,7 +1001,7 @@ public class MarkdownUtils
         {
             return this.getClass()
                        .getSimpleName()
-                + " [tight=" + this.tight + ", elements=" + this.elements + "]";
+                   + " [tight=" + this.tight + ", elements=" + this.elements + "]";
         }
 
         @Override
@@ -1292,6 +1302,96 @@ public class MarkdownUtils
         }
     }
 
+    /**
+     * A block quote like <code>&gt; quoted text</code>, holding the block level {@link Element}s written behind the quote markers - which may in turn be
+     * further {@link BlockQuote}s, lists, headings, code blocks and so on.
+     * <p>
+     * This element is only produced if {@link MarkdownParseOptions#enableBlockQuotes()} is set. Otherwise the content of a block quote arrives as regular,
+     * unwrapped sibling {@link Element}s, as it always did.
+     *
+     * @see MarkdownParseOptions#enableBlockQuotes()
+     * @author omnaest
+     */
+    public static class BlockQuote implements ElementWithChildren
+    {
+        private final List<Element> elements;
+
+        public BlockQuote(List<Element> elements)
+        {
+            super();
+            this.elements = elements;
+        }
+
+        public List<Element> getElements()
+        {
+            return this.elements;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "BlockQuote [elements=" + this.elements + "]";
+        }
+
+        @Override
+        public List<Element> getChildren()
+        {
+            return this.getElements();
+        }
+
+        @Override
+        public Optional<BlockQuote> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new BlockQuote(cloneAndFilterElements(this.elements, inclusionFilter)))
+                           .filter(inclusionFilter);
+        }
+    }
+
+    /**
+     * A single item of a {@link BasicList}, holding everything written within the item: paragraphs, nested lists, code blocks, headings, images, tables and
+     * the {@link TaskListMarker} of a task list item.
+     * <p>
+     * This element is only produced if {@link MarkdownParseOptions#enableListItems()} is set. Otherwise {@link BasicList#getElements()} is the flat
+     * concatenation of the content of all items and the boundaries between the items are lost.
+     *
+     * @see MarkdownParseOptions#enableListItems()
+     * @author omnaest
+     */
+    public static class ListItem implements ElementWithChildren
+    {
+        private final List<Element> elements;
+
+        public ListItem(List<Element> elements)
+        {
+            super();
+            this.elements = elements;
+        }
+
+        public List<Element> getElements()
+        {
+            return this.elements;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ListItem [elements=" + this.elements + "]";
+        }
+
+        @Override
+        public List<Element> getChildren()
+        {
+            return this.getElements();
+        }
+
+        @Override
+        public Optional<ListItem> cloneAndFilter(Predicate<Element> inclusionFilter)
+        {
+            return Optional.of(new ListItem(cloneAndFilterElements(this.elements, inclusionFilter)))
+                           .filter(inclusionFilter);
+        }
+    }
+
     public static class Image implements Element
     {
         private String link;
@@ -1381,10 +1481,59 @@ public class MarkdownUtils
     {
         private boolean wrapIntoParagraphs  = false;
         private boolean parseCustomIdTokens = false;
+        private boolean blockQuotes         = false;
+        private boolean listItems           = false;
 
         protected MarkdownParseOptions()
         {
             super();
+        }
+
+        /**
+         * Provides block quotes as {@link BlockQuote} elements holding their content. This is off by default, because a consumer dispatching over the known
+         * {@link Element} kinds would not know the wrapper and silently drop the quoted content with it.
+         *
+         * @see #isBlockQuotes()
+         * @return
+         */
+        public MarkdownParseOptions enableBlockQuotes()
+        {
+            return this.enableBlockQuotes(true);
+        }
+
+        public MarkdownParseOptions enableBlockQuotes(boolean blockQuotes)
+        {
+            this.blockQuotes = blockQuotes;
+            return this;
+        }
+
+        public boolean isBlockQuotes()
+        {
+            return this.blockQuotes;
+        }
+
+        /**
+         * Provides every item of a list as {@link ListItem} element holding its content, so that {@link BasicList#getElements()} holds only {@link ListItem}s.
+         * This is off by default, because a consumer dispatching over the known {@link Element} kinds would not know the wrapper and silently drop the
+         * itemized content with it.
+         *
+         * @see #isListItems()
+         * @return
+         */
+        public MarkdownParseOptions enableListItems()
+        {
+            return this.enableListItems(true);
+        }
+
+        public MarkdownParseOptions enableListItems(boolean listItems)
+        {
+            this.listItems = listItems;
+            return this;
+        }
+
+        public boolean isListItems()
+        {
+            return this.listItems;
         }
 
         public MarkdownParseOptions enableWrapIntoParagraphs()
@@ -1559,8 +1708,7 @@ public class MarkdownUtils
          * A nested {@link Element} like a {@link Heading} or {@link Link} is visited by an own {@link ElementConsumerDrivenVisitor}, so any surrounding emphasis
          * has to be handed over explicitly to not get lost on the way down.
          */
-        private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options, boolean inheritedBold, boolean inheritedItalic,
-                                            boolean inheritedStrikethrough)
+        private ElementConsumerDrivenVisitor(Consumer<Element> elementConsumer, MarkdownParseOptions options, boolean inheritedBold, boolean inheritedItalic, boolean inheritedStrikethrough)
         {
             this.elementConsumer = elementConsumer;
             this.options = options;
@@ -1736,6 +1884,36 @@ public class MarkdownUtils
             else
             {
                 super.visit(paragraph);
+            }
+        }
+
+        @Override
+        public void visit(org.commonmark.node.BlockQuote blockQuote)
+        {
+            if (this.options.isBlockQuotes())
+            {
+                List<Element> elements = new ArrayList<>();
+                this.newChildVisitor(elements::add).visitChildren(blockQuote);
+                this.elementConsumer.accept(new BlockQuote(elements));
+            }
+            else
+            {
+                super.visit(blockQuote);
+            }
+        }
+
+        @Override
+        public void visit(org.commonmark.node.ListItem listItem)
+        {
+            if (this.options.isListItems())
+            {
+                List<Element> elements = new ArrayList<>();
+                this.newChildVisitor(elements::add).visitChildren(listItem);
+                this.elementConsumer.accept(new ListItem(elements));
+            }
+            else
+            {
+                super.visit(listItem);
             }
         }
 
@@ -2065,7 +2243,7 @@ public class MarkdownUtils
                 Optional.ofNullable(textToChecked)
                         .orElse(Collections.emptyMap())
                         .forEach((text, checked) -> this.appendRawLine("- [" + (Boolean.TRUE.equals(checked) ? "x" : " ") + "] "
-                                + StringUtils.defaultString(text)));
+                                                                       + StringUtils.defaultString(text)));
                 this.addRawLineBreak();
                 return this;
             }
